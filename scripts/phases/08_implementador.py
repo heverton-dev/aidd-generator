@@ -39,7 +39,7 @@ from typing import Optional, Dict, List, Any, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent))
 from utils_modelo import detectar_modelo_harness, obter_nome_amigavel_modelo
-from utils_delegacao import solicitar_llm, extrair_json_resposta
+from utils_delegacao import solicitar_llm, extrair_json_resposta, LLMNaoConfiguradoException
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
@@ -369,10 +369,14 @@ class ImplementadorFase8:
         )
         contexto = "Phase 8: Arquiteto de Banco de Dados / Schema Centralizado"
 
-        resposta = solicitar_llm(
-            prompt=prompt, contexto=contexto, fase="phase_08_schema",
-            modelo=os.getenv('LLM_MODEL', self.modelo_final), timeout_delegacao=60
-        )
+        try:
+            resposta = solicitar_llm(
+                prompt=prompt, contexto=contexto, fase="phase_08_schema",
+                modelo=os.getenv('LLM_MODEL', self.modelo_final), timeout_delegacao=60
+            )
+        except LLMNaoConfiguradoException as e:
+            print(f"   ❌ {e.mensagem_usuario}")
+            return None
         if resposta is None:
             return None
 
@@ -422,10 +426,14 @@ class ImplementadorFase8:
         )
         contexto = "Phase 8: Teste de Integração / Fluxo End-to-End entre Scripts"
 
-        resposta = solicitar_llm(
-            prompt=prompt, contexto=contexto, fase="phase_08_integracao",
-            modelo=os.getenv('LLM_MODEL', self.modelo_final), timeout_delegacao=60
-        )
+        try:
+            resposta = solicitar_llm(
+                prompt=prompt, contexto=contexto, fase="phase_08_integracao",
+                modelo=os.getenv('LLM_MODEL', self.modelo_final), timeout_delegacao=60
+            )
+        except LLMNaoConfiguradoException as e:
+            print(f"   ❌ {e.mensagem_usuario}")
+            return False, None
         if resposta is None:
             print("   ⚠️ LLM não respondeu para o teste de integração")
             return False, None
@@ -503,10 +511,14 @@ class ImplementadorFase8:
         )
         contexto = f"Phase 8: Implementador. Script: {script_spec.get('nome')}"
 
-        resposta = solicitar_llm(
-            prompt=prompt, contexto=contexto, fase="phase_08",
-            modelo=os.getenv('LLM_MODEL', self.modelo_final), timeout_delegacao=60
-        )
+        try:
+            resposta = solicitar_llm(
+                prompt=prompt, contexto=contexto, fase="phase_08",
+                modelo=os.getenv('LLM_MODEL', self.modelo_final), timeout_delegacao=60
+            )
+        except LLMNaoConfiguradoException as e:
+            print(f"   ❌ {e.mensagem_usuario}")
+            return None
         if resposta is None:
             return None
 
@@ -564,10 +576,16 @@ class ImplementadorFase8:
                 erro=erro_compacto,
                 modulo=modulo,
             )
-            resposta_fix = solicitar_llm(
-                prompt=prompt_fix, contexto=contexto, fase="phase_08_fix",
-                modelo=os.getenv('LLM_MODEL', self.modelo_final), timeout_delegacao=60
-            )
+            try:
+                resposta_fix = solicitar_llm(
+                    prompt=prompt_fix, contexto=contexto, fase="phase_08_fix",
+                    modelo=os.getenv('LLM_MODEL', self.modelo_final), timeout_delegacao=60
+                )
+            except LLMNaoConfiguradoException as e:
+                print(f"   ❌ {e.mensagem_usuario}")
+                impl['tentativas'] = tentativa
+                impl['falhou_apos_tentativas'] = True
+                return impl
             if resposta_fix is None:
                 impl['tentativas'] = tentativa
                 impl['falhou_apos_tentativas'] = True

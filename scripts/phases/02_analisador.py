@@ -24,7 +24,7 @@ from typing import Optional, Dict, List, Any
 # Importar utils para detectar modelo e protocolo delegado
 sys.path.insert(0, str(Path(__file__).parent))
 from utils_modelo import detectar_modelo_harness, obter_nome_amigavel_modelo, log_modelo_detectado
-from utils_delegacao import solicitar_llm, extrair_json_resposta
+from utils_delegacao import solicitar_llm, extrair_json_resposta, LLMNaoConfiguradoException
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
@@ -296,13 +296,17 @@ class AnalisadorFase2:
 
         print(f"   🤖 Solicitando análise ao LLM (via protocolo universal)...")
 
-        resposta = solicitar_llm(
-            prompt=prompt,
-            contexto=contexto,
-            fase="phase_02",
-            modelo=os.getenv('LLM_MODEL', self.modelo_final),
-            timeout_delegacao=30
-        )
+        try:
+            resposta = solicitar_llm(
+                prompt=prompt,
+                contexto=contexto,
+                fase="phase_02",
+                modelo=os.getenv('LLM_MODEL', self.modelo_final),
+                timeout_delegacao=30
+            )
+        except LLMNaoConfiguradoException as e:
+            print(f"   ❌ {e.mensagem_usuario}")
+            return None
 
         if resposta is None:
             print(f"   ❌ Falha ao obter resposta do LLM (nenhuma ADE ativa e/ou headless sem credencial)")

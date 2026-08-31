@@ -30,7 +30,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Importar utils para detectar modelo e protocolo delegado
 sys.path.insert(0, str(Path(__file__).parent))
 from utils_modelo import detectar_modelo_harness, obter_nome_amigavel_modelo, log_modelo_detectado
-from utils_delegacao import solicitar_llm, extrair_json_resposta
+from utils_delegacao import solicitar_llm, extrair_json_resposta, LLMNaoConfiguradoException
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
@@ -396,13 +396,17 @@ class DesignerFase3:
             contexto = f"Phase 3: Designer AIDD. Subagente: {nome}"
 
             for tentativa in range(1, max_tentativas + 1):
-                resposta = solicitar_llm(
-                    prompt=prompt_completo,
-                    contexto=contexto,
-                    fase=f"phase_03_subagent_{nome}",
-                    modelo=os.getenv('LLM_MODEL', self.modelo_final),
-                    timeout_delegacao=60
-                )
+                try:
+                    resposta = solicitar_llm(
+                        prompt=prompt_completo,
+                        contexto=contexto,
+                        fase=f"phase_03_subagent_{nome}",
+                        modelo=os.getenv('LLM_MODEL', self.modelo_final),
+                        timeout_delegacao=60
+                    )
+                except LLMNaoConfiguradoException as e:
+                    print(f"   ❌ {e.mensagem_usuario}")
+                    return None
 
                 if resposta is None:
                     if tentativa < max_tentativas:

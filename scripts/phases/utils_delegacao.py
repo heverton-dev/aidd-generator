@@ -21,6 +21,22 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
+
+# =============================================================================
+# EXCEÇÕES CUSTOMIZADAS
+# =============================================================================
+
+class LLMNaoConfiguradoException(Exception):
+    """Erro de configuração do provedor LLM — mensagem amigável para o usuário final."""
+
+    def __init__(self, mensagem_usuario: str, detalhes_tecnicos: str):
+        super().__init__(mensagem_usuario)
+        self.mensagem_usuario = mensagem_usuario
+        self.detalhes_tecnicos = detalhes_tecnicos
+
+    def __str__(self) -> str:
+        return self.mensagem_usuario
+
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
 
@@ -347,11 +363,54 @@ def solicitar_llm_modo_headless(
             return resultado
 
         except Exception as e:
+            _traduzir_erro_litellm(e, modelo)
             print(f"✗ Erro ao chamar LLM ({modelo}) [tentativa {tentativa}/{max_tentativas}]: {type(e).__name__}: {e}")
             if tentativa < max_tentativas:
                 time.sleep(3 * tentativa)
             else:
                 return None
+
+
+def _traduzir_erro_litellm(erro: Exception, modelo: str) -> None:
+    """Traduz erros crus do litellm em LLMNaoConfiguradoException amigável.
+
+    Captura os cenários reais que o usuário final encontra:
+    - BadRequestError: modelo/provedor não configurado ou inválido
+    - AuthenticationError: chave de API ausente ou inválida
+    - ConnectionError/timeout: problemas de rede
+    """
+    nome_erro = type(erro).__name__
+    texto_erro = str(erro)
+
+    # BadRequestError — modelo/provedor mal configurado (o erro mais comum e feio)
+    if nome_erro == 'BadRequestError':
+        raise LLMNaoConfiguradoException(
+            mensagem_usuario=(
+                f"Provedor de IA não configurado corretamente para o modelo '{modelo}'. "
+                "Configure LLM_MODEL e a chave do provedor no arquivo .env (veja .env.example)."
+            ),
+            detalhes_tecnicos=f"{nome_erro}: {texto_erro}"
+        ) from erro
+
+    # AuthenticationError — chave inválida ou ausente
+    if nome_erro == 'AuthenticationError':
+        raise LLMNaoConfiguradoException(
+            mensagem_usuario=(
+                "Chave de API do provedor de IA inválida ou ausente. "
+                "Verifique a variável correspondente no arquivo .env (veja .env.example)."
+            ),
+            detalhes_tecnicos=f"{nome_erro}: {texto_erro}"
+        ) from erro
+
+    # Erros de rede / timeout
+    if nome_erro in ('ConnectionError', 'Timeout', 'APIConnectionError'):
+        raise LLMNaoConfiguradoException(
+            mensagem_usuario=(
+                "Não foi possível conectar ao provedor de IA. "
+                "Verifique sua conexão com a internet e as credenciais no arquivo .env."
+            ),
+            detalhes_tecnicos=f"{nome_erro}: {texto_erro}"
+        ) from erro
 
 
 # =============================================================================

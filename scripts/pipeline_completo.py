@@ -41,6 +41,7 @@ sys.path.insert(0, str(PHASES_DIR))
 
 # Pré-voo LLM (verifica LLM_MODEL + credencial antes de rodar o pipeline)
 from preflight_llm import verificar_llm_pronto  # noqa: E402
+from utils_delegacao import LLMNaoConfiguradoException
 
 
 def _carregar_fase(alias: str, filename: str):
@@ -193,10 +194,17 @@ def main():
 
     print(f"✓ {msg}")
 
-    resultado = executar_pipeline(
-        args.ideia, Path(args.pasta), nao_interativo=not args.interativo,
-        implementar_codigo=args.implementar_codigo
-    )
+    # Rede de segurança: mesmo com o pré-voo passando (checa só presença de
+    # env vars), uma chave presente mas inválida só falha na chamada real —
+    # captura aqui pra nunca vazar o stack trace cru do litellm.
+    try:
+        resultado = executar_pipeline(
+            args.ideia, Path(args.pasta), nao_interativo=not args.interativo,
+            implementar_codigo=args.implementar_codigo
+        )
+    except LLMNaoConfiguradoException as e:
+        print(f"\n❌ {e.mensagem_usuario}")
+        sys.exit(1)
 
     print("\n" + "=" * 70)
     if resultado['status'] == 'COMPLETO':
