@@ -88,6 +88,17 @@ A Fase 8 usa LLM para gerar código Python funcional com testes. Resultados reai
 
 **Resumo**: Fases 1-7 são determinísticas e confiáveis. A Fase 8 é um assistente que acelera, não substitui revisão humana.
 
+## Dica: orquestração multi-agente com ORCA
+
+O aidd-generator funciona sozinho, via CLI direto — nenhuma ferramenta extra é necessária. Mas se você estiver rodando múltiplos harnesses de IA ao mesmo tempo (Claude Code, Antigravity, MimoCode, OpenCode, etc.), o **ORCA** pode ajudar a organizar o trabalho:
+
+- **Worktrees isoladas** — cada agente trabalha em sua própria cópia do repositório, sem conflito de arquivos
+- **Fase 8 em paralelo** — rode a implementação de código com LLMs diferentes ao mesmo tempo e compare resultados lado a lado
+- **Auditoria/revisão concorrente** — paralelize a revisão do código gerado por diferentes agentes sem que um atrapalhe o outro
+- **Terminais gerenciados** — cada agente tem seu próprio terminal, sem disputa de recursos
+
+É uma ferramenta complementar, não um requisito. Se você usa apenas um harness por vez, o aidd-generator via CLI direto já resolve.
+
 ## Licença
 
 MIT — veja [LICENSE](LICENSE).

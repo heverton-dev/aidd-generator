@@ -88,6 +88,8 @@ Este projeto está estruturado segundo a **metodologia AIDD (AI-Driven Developme
 
 **Check:** Se força credencial específica, quebra universalidade.
 
+> **Nota para múltiplos harnesses simultâneos:** Se você pretende rodar mais de um agente de IA em paralelo neste projeto (ex: comparar resultados da Fase 8 com LLMs diferentes, ou paralelizar auditoria), o ORCA oferece worktrees Git isoladas e terminais gerenciados por agente — evita conflitos e permite comparação lado a lado. Não é obrigatório; o aidd-generator funciona normalmente com um único harness via CLI.
+
 ### 5. Zero Duplicidade Desnecessária
 - Um arquivo central, symlinks em todos os harness
 - Não há `CLAUDE.md`, `CODEX.md`, `GEMINI.md` — todos apontam para `AGENTS.md`
