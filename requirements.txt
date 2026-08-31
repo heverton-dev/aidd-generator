@@ -1,0 +1,6 @@
+litellm
+python-dotenv
+requests
+reportlab
+markdown
+pypdf
