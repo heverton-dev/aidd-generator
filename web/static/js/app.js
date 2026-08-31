@@ -9,7 +9,8 @@ document.addEventListener('DOMContentLoaded', () => {
         config: null,
         pollingInterval: null,
         ultimoStatus: null,
-        pastaSugeridaModificadaManual: false
+        pastaSugeridaModificadaManual: false,
+        pastaMonitorada: null
     };
 
     // Elementos DOM principais
@@ -46,6 +47,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const containerFasesGrid = document.getElementById('container-fases-grid');
     const terminalLogsBody = document.getElementById('terminal-logs-body');
     const btnToggleLogs = document.getElementById('btn-toggle-logs');
+
+    // Elementos Monitorar Pasta
+    const inputMonitorPasta = document.getElementById('input-monitor-pasta');
+    const btnMonitorarPasta = document.getElementById('btn-monitorar-pasta');
+
+    // Elementos Workspace
+    const workspaceConteudo = document.getElementById('workspace-conteudo');
+    const workspaceVazio = document.getElementById('workspace-vazio');
+    const workspaceObjetivo = document.getElementById('workspace-objetivo');
+    const workspaceData = document.getElementById('workspace-data');
+    const workspaceCompletas = document.getElementById('workspace-completas');
+    const workspaceProgressoSub = document.getElementById('workspace-progresso-sub');
+    const workspaceBarraFill = document.getElementById('workspace-barra-fill');
+    const workspaceTextoEtapas = document.getElementById('workspace-texto-etapas');
+    const workspaceTextoPorcentagem = document.getElementById('workspace-texto-porcentagem');
+    const workspaceEtapasGrid = document.getElementById('workspace-etapas-grid');
 
     // Elementos Resultado
     const resultadoVazio = document.getElementById('resultado-vazio');
@@ -97,7 +114,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     navButtons.forEach(btn => {
-        btn.addEventListener('click', () => alternarAba(btn.dataset.tab));
+        btn.addEventListener('click', () => {
+            alternarAba(btn.dataset.tab);
+            if (btn.dataset.tab === 'tab-workspace') {
+                carregarWorkspace();
+            }
+        });
     });
 
     if (btnIrConfigAlerta) {
@@ -428,7 +450,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function consultarStatusPipeline() {
         try {
-            const resp = await fetch('/api/pipeline/status');
+            let resp;
+            if (estado.pastaMonitorada) {
+                resp = await fetch(`/api/projeto/status?pasta=${encodeURIComponent(estado.pastaMonitorada)}`);
+            } else {
+                resp = await fetch('/api/pipeline/status');
+            }
             const data = await resp.json();
 
             if (!data.sucesso || !data.status) return;
@@ -647,6 +674,114 @@ document.addEventListener('DOMContentLoaded', () => {
             alert(`Erro na chamada: ${err.message}`);
         }
     });
+
+    // =========================================================================
+    // MONITORAR PASTA ARBITRÁRIA
+    // =========================================================================
+    btnMonitorarPasta.addEventListener('click', async () => {
+        const pasta = inputMonitorPasta.value.trim();
+        if (!pasta) {
+            alert('Informe o caminho de uma pasta de projeto para monitorar.');
+            inputMonitorPasta.focus();
+            return;
+        }
+
+        // Define a pasta monitorada e inicia o polling
+        estado.pastaMonitorada = pasta;
+        progressoTituloIdeia.textContent = 'Monitorando Projeto';
+        progressoCaminhoPasta.textContent = pasta;
+        cardErroAmigavel.classList.add('hidden');
+        progressoPulse.classList.remove('hidden');
+
+        // Alterna para aba de progresso e inicia polling
+        alternarAba('tab-progresso');
+        iniciarPollingProgresso();
+    });
+
+    // Permitir monitorar ao pressionar Enter no campo
+    inputMonitorPasta.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            btnMonitorarPasta.click();
+        }
+    });
+
+
+    // =========================================================================
+    // WORKSPACE (PLANO-EXECUCAO-ESTRUTURADO.json)
+    // =========================================================================
+    async function carregarWorkspace() {
+        try {
+            const resp = await fetch('/api/workspace/status');
+            const data = await resp.json();
+
+            if (!data.sucesso || !data.workspace) {
+                workspaceConteudo.classList.add('hidden');
+                workspaceVazio.classList.remove('hidden');
+                return;
+            }
+
+            const ws = data.workspace;
+            workspaceConteudo.classList.remove('hidden');
+            workspaceVazio.classList.add('hidden');
+
+            workspaceObjetivo.textContent = ws.objetivo_geral || '-';
+            workspaceData.textContent = ws.ultima_atualizacao || '-';
+            workspaceCompletas.textContent = `${ws.etapas_completas} / ${ws.total_etapas}`;
+            workspaceProgressoSub.textContent = `${ws.etapas_pendentes} pendente(s) • ${ws.etapas_parciais} parcial(is)`;
+
+            const percentual = ws.progresso_percentual || 0;
+            workspaceBarraFill.style.width = `${percentual}%`;
+            workspaceTextoEtapas.textContent = `${ws.etapas_completas} de ${ws.total_etapas} etapas concluídas`;
+            workspaceTextoPorcentagem.textContent = `${percentual}%`;
+
+            // Renderizar lista de etapas
+            workspaceEtapasGrid.innerHTML = '';
+            (ws.etapas || []).forEach(etapa => {
+                const statusUpper = (etapa.status || '').toUpperCase();
+                let icon = '⏳';
+                let badgeClass = 'pendente';
+                let badgeTexto = 'Pendente';
+
+                if (statusUpper.includes('COMPLETO')) {
+                    icon = '✅';
+                    badgeClass = 'concluida';
+                    badgeTexto = 'Completo';
+                } else if (statusUpper.includes('PARCIALMENTE')) {
+                    icon = '🔄';
+                    badgeClass = 'rodando';
+                    badgeTexto = 'Parcialmente';
+                }
+
+                const card = document.createElement('div');
+                card.className = `phase-card phase-${badgeClass}`;
+
+                const metaParts = [];
+                if (etapa.data_conclusao) metaParts.push(etapa.data_conclusao);
+                if (etapa.commit) metaParts.push(`<code>${escapeHtml(etapa.commit)}</code>`);
+
+                card.innerHTML = `
+                    <div class="phase-left">
+                        <div class="phase-icon">${icon}</div>
+                        <div class="phase-info">
+                            <h4>${escapeHtml(etapa.nome || etapa.id || 'Etapa')}</h4>
+                            <p>${escapeHtml(etapa.id || '')}</p>
+                        </div>
+                    </div>
+                    <div class="phase-meta">
+                        <span>${metaParts.join(' • ')}</span>
+                        <span class="phase-badge ${badgeClass}">${badgeTexto}</span>
+                    </div>
+                `;
+                workspaceEtapasGrid.appendChild(card);
+            });
+        } catch (err) {
+            console.error('Erro ao carregar workspace:', err);
+            workspaceConteudo.classList.add('hidden');
+            workspaceVazio.classList.remove('hidden');
+        }
+    }
+
 
     // Inicialização
     carregarConfiguracao();

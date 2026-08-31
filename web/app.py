@@ -18,6 +18,7 @@ from web.config_manager import (
     testar_chave_llm
 )
 from web.pipeline_runner import runner_global
+from web.status_parser import analisar_status_pasta_projeto
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
@@ -238,6 +239,79 @@ def api_abrir_pasta():
                 'sucesso': False,
                 'mensagem': f"Erro ao abrir pasta: {e2}"
             }), 500
+
+
+@app.route('/api/projeto/status', methods=['GET'])
+def api_status_projeto_arbitrario():
+    """Retorna o status de qualquer pasta de projeto AIDD (não só a do runner)."""
+    pasta = request.args.get('pasta', '').strip()
+
+    if not pasta:
+        # Fallback: usar pasta do runner_global se houver
+        status_runner = runner_global.obter_status()
+        pasta = status_runner.get('pasta_projeto', '')
+
+    if not pasta:
+        return jsonify({'sucesso': False, 'mensagem': 'Nenhuma pasta informada e nenhum pipeline em execução.'}), 400
+
+    pasta_path = Path(pasta)
+    if not pasta_path.exists():
+        return jsonify({'sucesso': False, 'mensagem': f'Pasta não encontrada: {pasta}'}), 404
+
+    try:
+        dados = analisar_status_pasta_projeto(pasta_path)
+        return jsonify({'sucesso': True, 'status': dados})
+    except Exception as e:
+        return jsonify({'sucesso': False, 'mensagem': f'Erro ao analisar pasta: {str(e)}'}), 500
+
+
+@app.route('/api/workspace/status', methods=['GET'])
+def api_status_workspace():
+    """Retorna o progresso do desenvolvimento da ferramenta (PLANO-EXECUCAO-ESTRUTURADO.json)."""
+    plano_path = ROOT_DIR / 'PLANO-EXECUCAO-ESTRUTURADO.json'
+
+    if not plano_path.exists():
+        return jsonify({'sucesso': False, 'mensagem': 'PLANO-EXECUCAO-ESTRUTURADO.json não encontrado'}), 404
+
+    try:
+        import json
+        conteudo = plano_path.read_text(encoding='utf-8')
+        plano = json.loads(conteudo)
+
+        metadata = plano.get('metadata', {})
+        etapas = plano.get('etapas', [])
+
+        # Contar status
+        total_etapas = len(etapas)
+        completas = sum(1 for e in etapas if 'COMPLETO' in (e.get('status', '')).upper())
+        pendentes = sum(1 for e in etapas if 'PENDENTE' in (e.get('status', '')).upper())
+        parciais = sum(1 for e in etapas if 'PARCIALMENTE' in (e.get('status', '')).upper())
+
+        etapas_simplificadas = []
+        for e in etapas:
+            etapas_simplificadas.append({
+                'id': e.get('id', ''),
+                'nome': e.get('nome', ''),
+                'status': e.get('status', ''),
+                'data_conclusao': e.get('data_conclusao', ''),
+                'commit': e.get('commit', '')
+            })
+
+        return jsonify({
+            'sucesso': True,
+            'workspace': {
+                'objetivo_geral': metadata.get('objetivo_geral', ''),
+                'ultima_atualizacao': metadata.get('ultima_atualizacao', ''),
+                'total_etapas': total_etapas,
+                'etapas_completas': completas,
+                'etapas_pendentes': pendentes,
+                'etapas_parciais': parciais,
+                'progresso_percentual': int((completas / total_etapas) * 100) if total_etapas > 0 else 0,
+                'etapas': etapas_simplificadas
+            }
+        })
+    except Exception as e:
+        return jsonify({'sucesso': False, 'mensagem': f'Erro ao ler plano: {str(e)}'}), 500
 
 
 def criar_app() -> Flask:

@@ -365,3 +365,67 @@ def test_sanitizar_nome_pasta():
     assert sanitizar_nome_pasta("") == "novo-projeto-aidd"
     assert sanitizar_nome_pasta("API de Gestão Financeira com IA") == "projeto-api-de-gestao-financeira"
     assert sanitizar_nome_pasta("Projeto Já Com Prefixo") == "projeto-ja-com-prefixo"
+
+
+# =============================================================================
+# 5. TESTES: ROTAS DE MONITORAMENTO (projeto/status e workspace/status)
+# =============================================================================
+
+def test_endpoint_projeto_status_pasta_real(client, tmp_path):
+    """/api/projeto/status com pasta real contendo .aidd/cache retorna status."""
+    pasta_projeto = tmp_path / "projeto-monitorado"
+    cache_dir = pasta_projeto / ".aidd" / "cache"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "_phase_01_index.json").write_text(json.dumps({
+        'fase_id': 'phase_01_research',
+        'status': 'COMPLETO',
+        'timestamps': {'duracao_segundos': 1.0},
+        'tokens': {'consumidos': 0}
+    }), encoding='utf-8')
+
+    res = client.get(f'/api/projeto/status?pasta={pasta_projeto}')
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data['sucesso'] is True
+    assert data['status']['pasta_existe'] is True
+    assert data['status']['fases_concluidas'] >= 1
+
+
+def test_endpoint_projeto_status_pasta_inexistente(client):
+    """/api/projeto/status com pasta inexistente retorna 404 honesto."""
+    res = client.get('/api/projeto/status?pasta=C:/caminho/inexistente/xyz')
+    assert res.status_code == 404
+    data = res.get_json()
+    assert data['sucesso'] is False
+    assert 'não encontrada' in data['mensagem'].lower()
+
+
+def test_endpoint_projeto_status_sem_pasta(client):
+    """/api/projeto/status sem pasta e sem runner ativo retorna 400."""
+    with patch('web.app.runner_global.obter_status', return_value={'pasta_projeto': ''}):
+        res = client.get('/api/projeto/status')
+        assert res.status_code == 400
+        data = res.get_json()
+        assert data['sucesso'] is False
+
+
+def test_endpoint_workspace_status(client):
+    """/api/workspace/status lê o PLANO-EXECUCAO-ESTRUTURADO.json real e retorna progresso."""
+    res = client.get('/api/workspace/status')
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data['sucesso'] is True
+    ws = data['workspace']
+    assert 'total_etapas' in ws
+    assert 'etapas_completas' in ws
+    assert 'progresso_percentual' in ws
+    assert isinstance(ws['etapas'], list)
+
+
+def test_endpoint_workspace_status_sem_plano(client, tmp_path):
+    """/api/workspace/status sem PLANO-EXECUCAO-ESTRUTURADO.json retorna 404."""
+    with patch('web.app.ROOT_DIR', tmp_path):
+        res = client.get('/api/workspace/status')
+        assert res.status_code == 404
+        data = res.get_json()
+        assert data['sucesso'] is False

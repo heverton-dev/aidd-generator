@@ -29,6 +29,9 @@
                 <button class="nav-btn" data-tab="tab-resultado" id="nav-btn-resultado">
                     <span class="icon">📊</span> Resultado
                 </button>
+                <button class="nav-btn" data-tab="tab-workspace" id="nav-btn-workspace">
+                    <span class="icon">🗂️</span> Workspace
+                </button>
                 <button class="nav-btn" data-tab="tab-config" id="nav-btn-config">
                     <span class="icon">⚙️</span> Configurações
                     <span class="status-dot" id="header-status-dot" title="Status da IA"></span>
@@ -104,6 +107,20 @@
             <!-- ABA 2: PROGRESSO DA GERAÇÃO                               -->
             <!-- ========================================================= -->
             <section id="tab-progresso" class="tab-content">
+                <!-- Monitorar Pasta Arbitrária -->
+                <div class="card monitor-card">
+                    <div class="card-header">
+                        <h3>Monitorar Projeto</h3>
+                        <p>Cole o caminho de uma pasta de projeto AIDD para acompanhar o progresso das fases.</p>
+                    </div>
+                    <div class="form-group">
+                        <div class="input-with-action">
+                            <input type="text" id="input-monitor-pasta" placeholder="C:\caminho\para\projeto">
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-monitorar-pasta">Monitorar</button>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card progress-overview-card">
                     <div class="progress-header-info">
                         <div>
@@ -338,6 +355,61 @@
                             </button>
                         </div>
                     </form>
+                </div>
+            </section>
+
+
+            <!-- ========================================================= -->
+            <!-- ABA 5: WORKSPACE (PLANO-EXECUCAO-ESTRUTURADO)             -->
+            <!-- ========================================================= -->
+            <section id="tab-workspace" class="tab-content">
+                <div id="workspace-conteudo" class="hidden">
+                    <!-- Objetivo Geral -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Objetivo do Projeto</h2>
+                            <p id="workspace-objetivo">-</p>
+                        </div>
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <span class="stat-label">Última Atualização</span>
+                                <span class="stat-value text-info" id="workspace-data">-</span>
+                                <span class="stat-sub">data da última mudança</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Etapas Concluídas</span>
+                                <span class="stat-value text-success" id="workspace-completas">-</span>
+                                <span class="stat-sub" id="workspace-progresso-sub">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Barra de Progresso -->
+                    <div class="card">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar-fill" id="workspace-barra-fill" style="width: 0%;"></div>
+                        </div>
+                        <div class="progress-bar-meta">
+                            <span id="workspace-texto-etapas">0 de 0 etapas concluídas</span>
+                            <span id="workspace-texto-porcentagem">0%</span>
+                        </div>
+                    </div>
+
+                    <!-- Lista de Etapas -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Etapas do Plano de Execução</h3>
+                        </div>
+                        <div class="phases-grid" id="workspace-etapas-grid">
+                            <!-- Etapas injetadas via JavaScript -->
+                        </div>
+                    </div>
+                </div>
+
+                <div id="workspace-vazio" class="card empty-state-card">
+                    <div class="empty-icon">🗂️</div>
+                    <h2>PLANO-EXECUCAO-ESTRUTURADO.json não encontrado</h2>
+                    <p>O arquivo de plano de execução não foi encontrado na raiz do projeto.</p>
                 </div>
             </section>
 
