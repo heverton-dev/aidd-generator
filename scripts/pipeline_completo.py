@@ -26,6 +26,7 @@ nunca segue adiante com dado fabricado ou fase pulada.
 """
 
 import sys
+import os
 import json
 import time
 import argparse
@@ -37,6 +38,9 @@ if sys.platform == 'win32':
 
 PHASES_DIR = Path(__file__).parent / 'phases'
 sys.path.insert(0, str(PHASES_DIR))
+
+# Pré-voo LLM (verifica LLM_MODEL + credencial antes de rodar o pipeline)
+from preflight_llm import verificar_llm_pronto  # noqa: E402
 
 
 def _carregar_fase(alias: str, filename: str):
@@ -178,6 +182,16 @@ def main():
                        help='Rodar também a Fase 8 (implementa código funcional real a partir do design, com testes e loop de correção)')
 
     args = parser.parse_args()
+
+    # --- Pré-voo: verificar LLM antes de gastar tempo com Fase 1 ---
+    ok, msg = verificar_llm_pronto()
+    if not ok:
+        print("\n" + "=" * 70)
+        print("❌ PREFLIGHT FALHOU — " + msg)
+        print("=" * 70 + "\n")
+        sys.exit(1)
+
+    print(f"✓ {msg}")
 
     resultado = executar_pipeline(
         args.ideia, Path(args.pasta), nao_interativo=not args.interativo,
