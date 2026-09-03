@@ -703,6 +703,127 @@
       "data_conclusao": "2026-08-30",
       "commit": "32b99b7",
       "proxima_etapa": null
+    },
+    {
+      "id": "fase-injector-1-contrato-schema",
+      "nome": "Injetor Universal — Fase 1: Contrato e Schema Draft 2020-12",
+      "descricao": "Contrato JSON Schema Draft 2020-12 (tipo, nome, descricao, camada_alvo, conteudo, alvo_projeto) e validador manual leve sem dependencia externa.",
+      "arquivos_afetados": [
+        "scripts/core/injector/schema_injector_request.json",
+        "scripts/core/injector/contrato.py"
+      ],
+      "decisoes": [
+        "Validador manual (subset Draft 2020-12) em vez de dependencia jsonschema — nao estava em requirements.txt"
+      ],
+      "criterios_sucesso": [
+        "Gate rejeita payload incompleto com erro estruturado",
+        "Payload valido e aceito"
+      ],
+      "status": "✅ COMPLETO",
+      "data_conclusao": "2026-09-03",
+      "commit": null,
+      "proxima_etapa": "fase-injector-2-profiles"
+    },
+    {
+      "id": "fase-injector-2-profiles",
+      "nome": "Injetor Universal — Fase 2: Matriz de Profiles (aidd-generator)",
+      "descricao": "Mapeamento exato de pastas de destino (dest/mirrors/anchors) para os 5 tipos de componente no projeto aidd-generator.",
+      "arquivos_afetados": [
+        "scripts/core/injector/profiles_registry.py"
+      ],
+      "decisoes": [
+        "Este worktree implementa apenas o profile 'aidd-generator' — demais projetos (aidd-master, aidd-master-enterprise, aidd-forge) sao de outras mesas/worktrees"
+      ],
+      "criterios_sucesso": [
+        "Resolucao exata de diretorios para os 5 tipos"
+      ],
+      "status": "✅ COMPLETO",
+      "data_conclusao": "2026-09-03",
+      "commit": null,
+      "proxima_etapa": "fase-injector-3-deteccao-materializacao"
+    },
+    {
+      "id": "fase-injector-3-deteccao-materializacao",
+      "nome": "Injetor Universal — Fase 3: Deteccao Hibrida e Materializacao Transacional",
+      "descricao": "Heuristica PT-BR com fallback delegado (utils_delegacao) para detectar tipo/camada; materializacao em staging + publicacao atomica com rollback automatico.",
+      "arquivos_afetados": [
+        "scripts/core/injector/detector_camada.py",
+        "scripts/core/injector/materializador.py"
+      ],
+      "decisoes": [
+        "Rollback via manifesto de arquivos publicados nesta transacao — remove so o que a propria transacao criou"
+      ],
+      "criterios_sucesso": [
+        "Zero arquivos orfaos em caso de interrupcao (provado por teste com falha forcada)",
+        "Criacao limpa em disco"
+      ],
+      "status": "✅ COMPLETO",
+      "data_conclusao": "2026-09-03",
+      "commit": null,
+      "proxima_etapa": "fase-injector-4-sincronizador"
+    },
+    {
+      "id": "fase-injector-4-sincronizador",
+      "nome": "Injetor Universal — Fase 4: Sincronizador Multi-Harness e Integrador Global",
+      "descricao": "Reflete o componente materializado em AGENTS.md (tabela de registro), HARNESS-COMPAT.json (mcps) e PLANO-EXECUCAO-ESTRUTURADO.json (specs), de forma aditiva.",
+      "arquivos_afetados": [
+        "scripts/core/injector/sincronizador_harness.py",
+        "AGENTS.md"
+      ],
+      "decisoes": [
+        "Anchors so sao reportados como sincronizados quando efetivamente escritos (bug corrigido durante o smoke-test manual)"
+      ],
+      "criterios_sucesso": [
+        "Artefato detectado imediatamente nos anchors configurados"
+      ],
+      "status": "✅ COMPLETO",
+      "data_conclusao": "2026-09-03",
+      "commit": null,
+      "proxima_etapa": "fase-injector-5-cli-intent-router"
+    },
+    {
+      "id": "fase-injector-5-cli-intent-router",
+      "nome": "Injetor Universal — Fase 5: CLI e Intent Router PT-BR",
+      "descricao": "Subcomando 'inject' em scripts/aidd_inject.py e padroes de linguagem natural PT-BR (PADROES_INJETAR) em utils_intent_router.py.",
+      "arquivos_afetados": [
+        "scripts/aidd_inject.py",
+        "scripts/phases/utils_intent_router.py"
+      ],
+      "decisoes": [
+        "Extensao aditiva do IntentRouter — padroes/testes existentes de gerar_projeto nao foram alterados"
+      ],
+      "criterios_sucesso": [
+        "CLI explicito e linguagem natural disparam o fluxo completo"
+      ],
+      "status": "✅ COMPLETO",
+      "data_conclusao": "2026-09-03",
+      "commit": null,
+      "proxima_etapa": "fase-injector-6-gate-prova-de-fogo"
+    },
+    {
+      "id": "fase-injector-6-gate-prova-de-fogo",
+      "nome": "Injetor Universal — Fase 6: Gate G_INJECT e Prova de Fogo",
+      "descricao": "Gate mecanico G_INJECT.py (schema, profiles, materializacao real, rollback real) registrado em verificar_gates.py, mais injecao real de uma skill e um MCP de exemplo.",
+      "arquivos_afetados": [
+        "scripts/gates/G_INJECT.py",
+        "scripts/verificar_gates.py",
+        "tests/test_injector_core.py",
+        "tests/test_injector_materializer.py",
+        "tests/test_injector_sincronizador.py",
+        "tests/test_gate_inject.py",
+        "tests/test_aidd_inject_cli.py"
+      ],
+      "decisoes": [
+        "G_INJECT marcado opcional (nao obrigatorio) em GATES_DISPONIVEIS, mesma classificacao de G_HARNESS_COMPAT — valida capacidade do proprio aidd-generator, nao conteudo de projeto gerado"
+      ],
+      "criterios_sucesso": [
+        "python scripts/gates/G_INJECT.py -> exit 0",
+        "pytest -q -> 100% verde, 0 skips"
+      ],
+      "status": "✅ COMPLETO",
+      "data_conclusao": "2026-09-03",
+      "commit": null,
+      "proxima_etapa": null
     }
   ],
   "metricas_tracejadas": {
