@@ -2,7 +2,7 @@
   "metadata": {
     "versao": "1.0",
     "data_criacao": "2026-08-30",
-    "ultima_atualizacao": "2026-09-03T15:31:06.450513+00:00",
+    "ultima_atualizacao": "2026-09-03T19:05:24.471928+00:00",
     "objetivo": "Registro de compatibilidade de orquestração por harness",
     "principio": "Universalidade — cada harness auto-detecta: orquestração OU headless-only"
   },
@@ -124,5 +124,15 @@
     "determinismo": "G_HARNESS_COMPAT.py é 100% Python — descobre compatibilidade sem teoria.",
     "rastreabilidade": "Cada harness tem timestamp de último teste + versão testada.",
     "transparencia": "Arquivo JSON público — usuário vê exatamente o status de cada harness."
-  }
+  },
+  "componentes_injetados": [
+    {
+      "id": "61efb4bec35c",
+      "tipo": "mcp",
+      "nome": "mcp-verificador-cve",
+      "descricao": "Servidor MCP que expoe uma tool de consulta simulada de CVEs conhecidas para pacotes Python informados pelo nome, como apoio a auditoria de seguranca de dependencias.",
+      "dest": "mcps/mcp-verificador-cve/server.py",
+      "data_injecao": "2026-09-03T19:05:24.471916+00:00"
+    }
+  ]
 }

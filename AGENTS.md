@@ -125,7 +125,13 @@ aidd-generator/
 ├── docs/
 │   ├── PRINCIPIO-UNIVERSALIDADE.md        # Protocolo delegado + headless
 │   ├── AUDITORIA-PRODUCAO-2026-08-30.md   # Auditoria de produção
+│   ├── specs/                             # Specs injetadas (Injetor Universal)
 │   └── ...
+│
+├── skills/                                # Skills injetadas (Injetor Universal)
+├── mcps/                                  # Servidores MCP injetados (Injetor Universal)
+├── rules/                                 # Regras injetadas (Injetor Universal)
+├── config/                                # Configs injetadas (Injetor Universal)
 │
 ├── scripts/
 │   ├── pipeline_completo.py               # Orquestrador do pipeline de 8 fases
@@ -304,6 +310,36 @@ resultado = handler.processar("crie um sistema de gerenciamento de tarefas")
 
 ---
 
+## 📦 Registro de Componentes Injetados
+
+**O que é:** Catálogo de componentes (skills, MCPs, rules, specs, configs) materializados
+pelo Injetor Universal de Componentes (`scripts/core/injector/` + `scripts/aidd_inject.py`).
+
+**Como funciona:**
+```bash
+# Via CLI explícito
+python scripts/aidd_inject.py inject skill "nome-da-skill" --descricao "..."
+
+# Via linguagem natural (PT-BR, IntentRouter)
+python scripts/aidd_inject.py "crie uma skill de auditoria de dependências"
+```
+
+Cada injeção roda o pipeline completo: valida o payload contra
+`scripts/core/injector/schema_injector_request.json`, resolve a rota de destino
+em `profiles_registry.py`, materializa os arquivos de forma transacional
+(`materializador.py`, com rollback automático em caso de falha) e sincroniza
+os anchors abaixo (`sincronizador_harness.py`). Validado mecanicamente pelo gate
+`scripts/gates/G_INJECT.py` (ver `scripts/verificar_gates.py`).
+
+| Tipo | Nome | Destino | Data | Descrição |
+| :--- | :--- | :--- | :--- | :--- |
+<!-- INJECTOR:TABELA:INICIO -->
+| skill | `auditoria-seguranca-dependencias` | `skills/auditoria-seguranca-dependencias/SKILL.md` | 2026-09-03 | Audita as dependencias declaradas em requirements.txt/requirements-dev.txt do projeto em busca de... |
+| mcp | `mcp-verificador-cve` | `mcps/mcp-verificador-cve/server.py` | 2026-09-03 | Servidor MCP que expoe uma tool de consulta simulada de CVEs conhecidas para pacotes Python infor... |
+<!-- INJECTOR:TABELA:FIM -->
+
+---
+
 ## Próximas Referências
 
 - **Workflow detalhado:** `AGENTS-WORKFLOW.md`
@@ -311,6 +347,7 @@ resultado = handler.processar("crie um sistema de gerenciamento de tarefas")
 - **Protocolo LLM universal:** `docs/PRINCIPIO-UNIVERSALIDADE.md`
 - **Compatibilidade de harness:** `HARNESS-COMPAT.json` + `scripts/gates/G_HARNESS_COMPAT.py`
 - **Lei Fundamental:** `.aidd/LEI-FUNDAMENTAL-TRANSPARENCIA.md`
+- **Injetor Universal de Componentes:** `scripts/core/injector/` + `scripts/aidd_inject.py` + `scripts/gates/G_INJECT.py`
 
 ---
 

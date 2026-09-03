@@ -81,6 +81,22 @@ PADROES_STATUS = [
     (r'(?:status|progresso|como\s+vai|onde\s+estamos)\s+(?:do\s+)?(?:pipeline|projeto|processo)', 'ver_status', None, 0.7),
 ]
 
+# Padrões de injeção de componentes (Injetor Universal — skills/MCPs/rules/specs/configs)
+# grupo 1 = palavra do tipo, grupo 2 = descrição/ideia do componente
+PADROES_INJETAR = [
+    (r'^/inject\s+(skill|habilidade|mcp|regra|rule|spec|especifica[cç][aã]o|config|configura[cç][aã]o)\s+(.+)', 1.0),
+    (r'(?:crie|criar|adicione|adicionar|gere|gerar|monte|montar|nova|novo|quero|preciso)\s+(?:um|uma|de\s+um[a]?|o|a)?\s*'
+     r'(skill|habilidade|mcp|regra|rule|spec|especifica[cç][aã]o|config|configura[cç][aã]o)\s+(?:de|para|sobre)\s+(.+)', 0.85),
+]
+
+_TIPO_PALAVRA_PARA_CANONICO: Dict[str, str] = {
+    'skill': 'skill', 'habilidade': 'skill',
+    'mcp': 'mcp',
+    'regra': 'rule', 'rule': 'rule',
+    'spec': 'spec', 'especificacao': 'spec', 'especificação': 'spec',
+    'config': 'config', 'configuracao': 'config', 'configuração': 'config',
+}
+
 
 # =============================================================================
 # INTENT ROUTER
@@ -160,6 +176,67 @@ class IntentRouter:
             )
 
         return IntentResultado(detectado=False)
+
+    def detectar_injecao(self, texto: str) -> IntentResultado:
+        """
+        Detecta intenção de injetar um componente (skill/mcp/rule/spec/config)
+        a partir de linguagem natural em PT-BR — usado pelo Injetor Universal
+        de Componentes (`scripts/aidd_inject.py`).
+        """
+        return detectar_injecao(texto)
+
+
+# =============================================================================
+# INJEÇÃO DE COMPONENTES — Injetor Universal (skills/MCPs/rules/specs/configs)
+# =============================================================================
+
+def detectar_injecao(texto: str) -> IntentResultado:
+    """
+    Detecta intenção de injetar um componente a partir de linguagem natural.
+
+    Exemplos:
+        "crie uma skill de auditoria de dependências" → tipo='skill'
+        "adicione um mcp de verificação de CVEs"       → tipo='mcp'
+        "nova regra de não commitar segredos"          → tipo='rule'
+
+    Returns:
+        IntentResultado com intencao='injetar_componente' e
+        argumentos_extras={'tipo': <tipo_canonico>} quando detectado.
+    """
+    if not texto or not isinstance(texto, str):
+        return IntentResultado(detectado=False)
+
+    texto_limpo = texto.strip()
+
+    for padrao_regex, confianca in PADROES_INJETAR:
+        match = re.search(padrao_regex, texto_limpo, re.IGNORECASE)
+        if not match:
+            continue
+
+        tipo_palavra = match.group(1).lower()
+        tipo = _TIPO_PALAVRA_PARA_CANONICO.get(tipo_palavra)
+        if not tipo:
+            continue
+
+        ideia = match.group(2).strip()
+        ideia = re.sub(r'\s+--\S+.*$', '', ideia).strip()
+
+        return IntentResultado(
+            detectado=True,
+            intencao='injetar_componente',
+            ideia_extraida=ideia,
+            confianca=confianca,
+            padrao_matcheado=padrao_regex,
+            argumentos_extras={'tipo': tipo},
+        )
+
+    return IntentResultado(detectado=False)
+
+
+def slug_a_partir_da_ideia(ideia: str, tamanho_max: int = 50) -> str:
+    """Converte uma descrição livre em um slug kebab-case (para usar como 'nome')."""
+    slug = re.sub(r'[^a-z0-9]+', '-', ideia.lower())[:tamanho_max].strip('-')
+    return slug or 'componente'
 
 
 # =============================================================================

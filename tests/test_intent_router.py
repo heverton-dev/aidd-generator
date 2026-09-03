@@ -16,6 +16,8 @@ from utils_intent_router import (
     IntentResultado,
     extrair_argumentos,
     texto_para_pipeline_args,
+    detectar_injecao,
+    slug_a_partir_da_ideia,
 )
 
 
@@ -222,3 +224,79 @@ class TestIntentResultado:
     def test_argumentos_extras_default(self):
         r = IntentResultado()
         assert r.argumentos_extras == {}
+
+
+# =============================================================================
+# Testes: Injeção de Componentes (Injetor Universal — skills/MCPs/rules/specs/configs)
+# =============================================================================
+
+class TestDetectarInjecao:
+    def test_skill(self):
+        r = detectar_injecao("crie uma skill de auditoria de dependências")
+        assert r.detectado is True
+        assert r.intencao == 'injetar_componente'
+        assert r.argumentos_extras['tipo'] == 'skill'
+        assert 'auditoria de dependências' in r.ideia_extraida
+
+    def test_habilidade_mapeia_para_skill(self):
+        r = detectar_injecao("adicione uma habilidade de revisão de contratos")
+        assert r.argumentos_extras['tipo'] == 'skill'
+
+    def test_mcp(self):
+        r = detectar_injecao("adicione um mcp de verificação de CVEs")
+        assert r.detectado is True
+        assert r.argumentos_extras['tipo'] == 'mcp'
+        assert 'CVEs' in r.ideia_extraida
+
+    def test_regra_mapeia_para_rule(self):
+        r = detectar_injecao("crie uma regra de não commitar segredos")
+        assert r.argumentos_extras['tipo'] == 'rule'
+
+    def test_spec(self):
+        r = detectar_injecao("crie uma spec de integração com o gateway de pagamento")
+        assert r.argumentos_extras['tipo'] == 'spec'
+
+    def test_especificacao_mapeia_para_spec(self):
+        r = detectar_injecao("gere uma especificação de migração de banco de dados")
+        assert r.argumentos_extras['tipo'] == 'spec'
+
+    def test_config(self):
+        r = detectar_injecao("adicione uma config de timeout do pipeline")
+        assert r.argumentos_extras['tipo'] == 'config'
+
+    def test_comando_slash_inject(self):
+        r = detectar_injecao("/inject skill auditoria de segredos")
+        assert r.detectado is True
+        assert r.confianca == 1.0
+        assert r.argumentos_extras['tipo'] == 'skill'
+
+    def test_texto_sem_intencao_de_injecao_nao_detecta(self):
+        r = detectar_injecao("crie um sistema de gerenciamento de tarefas")
+        assert r.detectado is False
+
+    def test_texto_vazio_nao_detecta(self):
+        assert detectar_injecao("").detectado is False
+
+    def test_nao_interfere_com_gerar_projeto(self):
+        """Padrões de injeção não devem capturar frases de geração de projeto (aditivo, sem regressão)."""
+        router = IntentRouter()
+        r = router.detectar("crie um sistema de gerenciamento de tarefas com Python")
+        assert r.intencao == 'gerar_projeto'
+
+    def test_metodo_no_router_delega_para_funcao(self):
+        router = IntentRouter()
+        r = router.detectar_injecao("crie uma skill de teste")
+        assert r.detectado is True
+        assert r.argumentos_extras['tipo'] == 'skill'
+
+
+class TestSlugAPartirDaIdeia:
+    def test_gera_slug_kebab_case(self):
+        assert slug_a_partir_da_ideia("Auditoria de Dependências") == 'auditoria-de-depend-ncias'
+
+    def test_slug_nao_vazio_para_texto_sem_letras(self):
+        assert slug_a_partir_da_ideia("!!!") == 'componente'
+
+    def test_respeita_tamanho_maximo(self):
+        texto_longo = "a" * 200
+        assert len(slug_a_partir_da_ideia(texto_longo, tamanho_max=50)) <= 50
