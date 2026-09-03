@@ -247,6 +247,63 @@ python scripts/gates/G_HARNESS_COMPAT.py
 
 ---
 
+## 🎯 Intent Router — Interface Zero Fricção
+
+**O que é:** Detecção automática de intenção do usuário para iniciar o pipeline sem necessidade de decorar comandos.
+
+**Como funciona:**
+O `IntentRouter` (em `scripts/phases/utils_intent_router.py`) analisa o texto do usuário e detecta automaticamente quando ele quer gerar um projeto. O `SlashCommandHandler` (em `scripts/commands/slash_gen.py`) mapeia comandos de IDE para ações do pipeline.
+
+**Comandos slash suportados:**
+```
+/generate <ideia>    →  Executa pipeline completo
+/aidd-gen <ideia>    →  Alias para /generate
+/aidd <ideia>        →  Alias para /generate
+/gen <ideia>         →  Alias curto
+/continue            →  Continua pipeline interrompido
+/status              →  Mostra status atual
+/help                →  Lista de comandos
+```
+
+**Linguagem natural (Intent Router):**
+Qualquer agente (Claude Code, Codex, Gemini, etc.) que ler este AGENTS.md DEVE interpretar as seguintes frases como gatilho para executar o pipeline:
+
+| Padrão (PT-BR) | Confiança | Ação |
+|:---|:---:|:---|
+| *"crie um sistema de [X]"* | 0.9 | `gerar_projeto` |
+| *"quero um app para [X]"* | 0.85 | `gerar_projeto` |
+| *"construa uma API para [X]"* | 0.9 | `gerar_projeto` |
+| *"preciso de um [X]"* | 0.85 | `gerar_projeto` |
+| *"gere um projeto de [X]"* | 0.9 | `gerar_projeto` |
+| *"build a [X]"* | 0.7-0.9 | `gerar_projeto` |
+| *"create a [X] for [Y]"* | 0.9 | `gerar_projeto` |
+| *"I need a [X]"* | 0.85 | `gerar_projeto` |
+
+**Argumentos opcionais (extraídos do texto):**
+```
+--pasta <caminho>       Define pasta de destino do projeto
+--implementar-codigo    Ativa Fase 8 (código funcional)
+--interativo            Modo interativo na Fase 4
+--nao-interativo        Modo automático (padrão)
+```
+
+**Uso pelo agente:**
+```python
+from scripts.commands.slash_gen import SlashCommandHandler
+
+handler = SlashCommandHandler()
+resultado = handler.processar("crie um sistema de gerenciamento de tarefas")
+# resultado.acao == 'gerar_projeto'
+# resultado.ideia == 'sistema de gerenciamento de tarefas'
+# resultado.confianca == 0.9
+```
+
+**1-Clique Desktop:**
+- Windows: execute `iniciar.bat` (abre interface web em localhost:5000)
+- Linux/Mac: execute `./iniciar.sh` (equivalente bash)
+
+---
+
 ## Próximas Referências
 
 - **Workflow detalhado:** `AGENTS-WORKFLOW.md`

@@ -21,3 +21,7 @@ Pesquisa projetos de referência reais (GitHub API, HuggingFace API) para qualqu
 ## Saída
 - `_phase_01_index.json` em `.aidd/cache/data/`
 - `insights_phase1.json` em `.aidd/cache/data/`
+
+## Tokens
+- Consumo: 0 (100% determinístico)
+- Justificativa: Python puro + requests, zero LLM
