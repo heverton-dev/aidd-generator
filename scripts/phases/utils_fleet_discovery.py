@@ -71,6 +71,12 @@ AGENTES_CONHECIDOS = {
         'prioridade': 3,
         'descricao': 'Google Gemini CLI',
     },
+    'mimocode': {
+        'comandos': ['mimocode', 'mimo'],
+        'especialidades': ['arquitetura', 'codigo', 'analise', 'design'],
+        'prioridade': 2,
+        'descricao': 'MimoCode Engine',
+    },
     'ollama': {
         'comandos': ['ollama'],
         'especialidades': ['codigo', 'analise'],
@@ -191,6 +197,18 @@ def detectar_via_ambiente() -> List[str]:
     # Claude Code
     if os.environ.get('CLAUDECODE') == '1':
         detectados.append('claude')
+
+    # MimoCode
+    if os.environ.get('MIMOCODE') or os.environ.get('MIMO_SESSION') or os.environ.get('MIMO_WORKSPACE'):
+        detectados.append('mimocode')
+
+    # OpenCode
+    if os.environ.get('OPENCODE') or os.environ.get('OPENCODE_SESSION'):
+        detectados.append('opencode')
+
+    # Antigravity / Gemini
+    if os.environ.get('ANTIGRAVITY_CLI') or os.environ.get('AGY_SESSION'):
+        detectados.append('antigravity')
 
     # ORCA
     if os.environ.get('ORCA_WORKSPACE'):

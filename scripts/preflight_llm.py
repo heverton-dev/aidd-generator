@@ -36,24 +36,50 @@ _PROVEDOR_KEY_MAP = {
 }
 
 
-def verificar_llm_pronto() -> tuple:
-    """Verifica se há um LLM configurado e funcional antes de rodar o pipeline.
+def verificar_llm_pronto(fleet=None) -> tuple:
+    """Verifica se ha um LLM configurado ou se ha um harness ativo para o Protocolo Delegado.
 
-    Checagem pré-voo: se o pipeline vai precisar de LLM (a partir da Fase 2),
-    não vale a pena gastar 7s+ na Fase 1 só para descobrir que falta configuração.
+    1. Protocolo Delegado (Universal): Se houver harness ativo (Claude, MimoCode, OpenCode,
+       Antigravity, ORCA), o pre-voo passa automaticamente sem exigir chaves externas de API.
+    2. Modo Headless (Fallback CI/CD): Se nao houver nenhum harness ativo, exige LLM_MODEL
+       e credencial no .env.
 
     Retorna (ok, mensagem):
-      ok=True  → pode prosseguir
-      ok=False → pare, mensagem explica o que configurar
+      ok=True  -> pode prosseguir
+      ok=False -> pare, mensagem explica o que configurar
     """
+    # 1. Checa se o modo delegado esta disponivel via harness ativo
+    try:
+        from phases.utils_fleet_discovery import resolver_fleet, detectar_via_ambiente
+    except ImportError:
+        try:
+            from utils_fleet_discovery import resolver_fleet, detectar_via_ambiente
+        except ImportError:
+            resolver_fleet = None
+            detectar_via_ambiente = None
+
+    if detectar_via_ambiente:
+        env_detectados = detectar_via_ambiente()
+        if env_detectados:
+            harnesses = ", ".join(env_detectados)
+            return (True, f"Harness ativo detectado ({harnesses}). Protocolo Delegado ativo (zero API keys requeridas).")
+
+    if fleet is None and resolver_fleet:
+        fleet = resolver_fleet()
+
+    if fleet and getattr(fleet, 'agentes_detectados', None):
+        # Se ha agentes instalados no host capazes de orquestrar
+        nomes = [a.nome for a in fleet.agentes_detectados]
+        if nomes:
+            return (True, f"Harness/Agente disponivel no host ({', '.join(nomes)}). Modo Delegado ativo.")
+
     llm_model = os.environ.get('LLM_MODEL')
 
     if not llm_model:
         return (False,
-            "Nenhuma IA configurada. Antes de continuar, configure "
-            "LLM_MODEL e a chave do provedor no arquivo .env "
-            "(copie de .env.example). Provedores documentados: "
-            "TogetherAI, NVIDIA NIM, Groq, OpenRouter, OpenAI-compativel."
+            "Nenhuma IA configurada e nenhum harness ativo detectado. "
+            "Se estiver rodando em modo Headless (sem agente interativo), "
+            "configure LLM_MODEL e a chave do provedor no arquivo .env."
         )
 
     # Detecta o provedor pelo prefixo do modelo e verifica a credencial
