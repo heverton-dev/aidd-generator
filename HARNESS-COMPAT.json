@@ -2,7 +2,7 @@
   "metadata": {
     "versao": "1.0",
     "data_criacao": "2026-08-30",
-    "ultima_atualizacao": "2026-09-03T15:21:38.498880+00:00",
+    "ultima_atualizacao": "2026-09-03T15:31:06.450513+00:00",
     "objetivo": "Registro de compatibilidade de orquestração por harness",
     "principio": "Universalidade — cada harness auto-detecta: orquestração OU headless-only"
   },
