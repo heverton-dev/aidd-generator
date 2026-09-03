@@ -33,39 +33,43 @@ if sys.platform == 'win32':
 # PROMPT PARA AGENT LLM
 # =============================================================================
 
-PROMPT_ANALISADOR_IDEIA = """Você é um Analista de Projetos AIDD especializado.
+PROMPT_ANALISADOR_IDEIA = """# ENTRADA: AIDD Project Analyst — specialized in structured project analysis.
 
-Analize a ideia do projeto FORNECIDA e as REFERÊNCIAS similares encontradas.
+Analyze the PROVIDED project idea and the SIMILAR REFERENCES found.
 
-IDEIA DO PROJETO:
+PROJECT IDEA:
 {ideia}
 
-REFERÊNCIAS SIMILARES (de Phase 1):
+SIMILAR REFERENCES (from Phase 1):
 {referencias_json}
 
-ANÁLISE ESTRUTURADA:
+STRUCTURED ANALYSIS:
 
-Para cada campo abaixo, seja específico e cite as referências quando aplicável.
+For each field below, be specific and cite references when applicable.
 
-1. **objetivo** (1-2 linhas): O que o projeto faz? Qual problema resolve?
+1. **objetivo** (1-2 lines): What does the project do? What problem does it solve?
 
-2. **publico_alvo** (1 linha): Quem vai usar? Engenheiros? Empresas? Educadores?
+2. **publico_alvo** (1 line): Who will use it? Engineers? Companies? Educators?
 
-3. **constraints** (3-5 bullets): Limitações técnicas/de negócio
-   - Exemplo: "Zero download de binários"
-   - Exemplo: "Máxima economia de tokens"
+3. **constraints** (3-5 bullets): Technical/business limitations
+   - Example: "Zero binary downloads"
+   - Example: "Maximum token economy"
 
-4. **stack_recomendado**: JSON com
+4. **stack_recomendado**: JSON with
    - linguagem: "Python 3.10+"
-   - framework: "FastAPI" ou "Django" ou "None"
-   - banco: "SQLite" ou "PostgreSQL"
+   - framework: "FastAPI" or "Django" or "None"
+   - banco: "SQLite" or "PostgreSQL"
    - libs_principais: ["lib1", "lib2"]
 
-5. **arquitetura** (1 parágrafo): Visão geral. Camadas? Fluxo?
+5. **arquitetura** (1 paragraph): Overview. Layers? Flow?
 
-6. **referencias_utilizadas**: Lista exata das referências que você citou
+6. **referencias_utilizadas**: Exact list of references you cited
 
-RETORNE UM JSON VÁLIDO (sem markdown, sem ```json, sem blabla):
+# COT: Before responding, think in English Caveman (3-5 dense lines, no articles):
+# "check project idea → extract core domain → map to stack → validate against refs → output JSON"
+
+# SAIDA: Return VALID JSON only (no markdown, no ```json, no extra text).
+# RESPOND IN BRAZILIAN PORTUGUESE (PT-BR) — all field values must be in PT-BR.
 
 {
   "objetivo": "...",
@@ -78,11 +82,11 @@ RETORNE UM JSON VÁLIDO (sem markdown, sem ```json, sem blabla):
     "libs_principais": ["..."]
   },
   "arquitetura": "...",
-  "referencias_utilizadas": ["referência1", "referência2"]
+  "referencias_utilizadas": ["referencia1", "referencia2"]
 }
 
-CRÍTICO: Mantenha zero alucinação. Só cite referências que estão na lista acima.
-CRÍTICO: Retorne APENAS JSON válido, nada mais."""
+CRITICAL: Zero hallucination. Only cite references from the list above.
+CRITICAL: Return ONLY valid JSON, nothing else."""
 
 
 # =============================================================================

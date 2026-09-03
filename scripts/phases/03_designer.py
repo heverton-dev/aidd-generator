@@ -40,23 +40,26 @@ if sys.platform == 'win32':
 # =============================================================================
 
 PROMPTS_SUBAGENTES = {
-    'arquiteto_camadas': """Você é um Arquiteto AIDD especializado.
+    'arquiteto_camadas': """# ENTRADA: AIDD Layer Architect — specialized in 5-layer AIDD design.
 
-A partir da análise da ideia do projeto (fase anterior), projete as **5 Camadas AIDD** específicas:
+From the project idea analysis (previous phase), design the specific **5 AIDD Layers**:
 
-1. **Camada 1: Contratos e Schemas** — JSON Schema Draft 2020-12 necessários
-2. **Camada 2: Determinismo** — Scripts Python 100% determinísticos
-3. **Camada 3: Gates** — Validações mecânicas (G0, G1, G2)
-4. **Camada 4: Persistência** — SQLite schema necessário
-5. **Camada 5: Bundles** — Estrutura de artefatos finais
+1. **Layer 1: Contracts and Schemas** — required JSON Schema Draft 2020-12
+2. **Layer 2: Determinism** — 100% deterministic Python scripts
+3. **Layer 3: Gates** — mechanical validations (G0, G1, G2)
+4. **Layer 4: Persistence** — required SQLite schema
+5. **Layer 5: Bundles** — final artifact structure
 
-Para cada camada, descreva:
-- Nome da camada
-- Responsabilidade clara
-- Artefatos principais (arquivos/scripts)
-- Padrão de validação
+For each layer, describe:
+- Layer name
+- Clear responsibility
+- Main artifacts (files/scripts)
+- Validation pattern
 
-SAÍDA (JSON):
+# COT: think in English Caveman (3-5 dense lines, no articles):
+# "check idea → map to 5 layers → define artifacts per layer → validate completeness → output JSON"
+
+# SAIDA: Return JSON only. RESPOND IN BRAZILIAN PORTUGUESE (PT-BR).
 {{
   "camadas": [
     {{"numero": 1, "nome": "...", "responsabilidade": "...", "artefatos": [...]}}
@@ -64,18 +67,21 @@ SAÍDA (JSON):
 }}
 """,
 
-    'engenheiro_scripts': """Você é um Engenheiro de Scripts AIDD.
+    'engenheiro_scripts': """# ENTRADA: AIDD Script Engineer — specialized in deterministic Python scripts.
 
-Para cada Camada do design, defina os **scripts Python necessários**:
-- Nome do script
-- Responsabilidade (uma linha)
-- Pseudocódigo estruturado
-- Determinismo: % de código que é Python puro (vs LLM)
-- Validação: como testar
+For each Layer in the design, define the **required Python scripts**:
+- Script name
+- Responsibility (one line)
+- Structured pseudocode
+- Determinism: % of code that is pure Python (vs LLM)
+- Validation: how to test
 
-Foco: máximo determinismo, mínimo LLM.
+Focus: maximum determinism, minimum LLM.
 
-SAÍDA (JSON):
+# COT: think in English Caveman (3-5 dense lines, no articles):
+# "scan layers → identify mechanical ops → write pseudocode → estimate determinism → output JSON"
+
+# SAIDA: Return JSON only. RESPOND IN BRAZILIAN PORTUGUESE (PT-BR).
 {{
   "scripts": [
     {{
@@ -90,82 +96,90 @@ SAÍDA (JSON):
 }}
 """,
 
-    'especialista_tokens': """Você é um Especialista em Economia de Tokens AIDD.
+    'especialista_tokens': """# ENTRADA: AIDD Token Economy Specialist — estimate real token consumption per phase.
 
-Estime o consumo real de tokens por fase deste projeto (não invente
-uma "economia vs abordagem ingênua" — não há baseline medido para essa
-comparação; reporte apenas o que é estimável com honestidade):
-- Phase 1 (Pesquisa): 0 tokens (puro Python, APIs GitHub/HuggingFace)
-- Phase 2 (Análise): ~1k-2k tokens (LLM estratégica)
-- Phase 3 (Design): ~5k-10k tokens (5 subagentes)
-- Phase 4 (Decisão): 0 tokens (modal input() / determinístico)
-- Phase 5 (Criação): 0 tokens (Python, filesystem/git/SQLite)
-- Phase 6 (Documentação): 0 tokens (templates Python, sem LLM)
+Estimate real token consumption per phase for this project (do NOT invent
+"savings vs naive approach" — no measured baseline exists for that comparison;
+report only what is honestly estimable):
+- Phase 1 (Research): 0 tokens (pure Python, GitHub/HuggingFace APIs)
+- Phase 2 (Analysis): ~1k-2k tokens (strategic LLM)
+- Phase 3 (Design): ~5k-10k tokens (5 subagents)
+- Phase 4 (Decision): 0 tokens (modal input() / deterministic)
+- Phase 5 (Creation): 0 tokens (Python, filesystem/git/SQLite)
+- Phase 6 (Documentation): 0 tokens (Python templates, zero LLM)
 
-Como 4 das 6 fases (P1, P4, P5, P6) rodam 100% em Python com zero LLM, o percentual de determinismo arquitetural é de aproximadamente 67% (4/6 fases = 66.7%).
+Since 4 of 6 phases (P1, P4, P5, P6) run 100% in pure Python with zero LLM,
+architectural determinism is approximately 67% (4/6 phases = 66.7%).
 
-SAÍDA (JSON):
+# COT: think in English Caveman (3-5 dense lines, no articles):
+# "count pure-python phases → count LLM phases → compute ratio → estimate tokens → output JSON"
+
+# SAIDA: Return JSON only. RESPOND IN BRAZILIAN PORTUGUESE (PT-BR).
 {{
   "fases": [
     {{"fase": "Phase 1", "tokens_consumidos": 0, "justificativa": "GitHub API pura"}},
-    {{"fase": "Phase 2", "tokens_consumidos": 1500, "justificativa": "Análise estratégica"}},
+    {{"fase": "Phase 2", "tokens_consumidos": 1500, "justificativa": "Analise estrategica"}},
     {{"fase": "Phase 3", "tokens_consumidos": 8000, "justificativa": "5 subagentes design"}},
-    {{"fase": "Phase 4", "tokens_consumidos": 0, "justificativa": "Decisor determinístico"}},
+    {{"fase": "Phase 4", "tokens_consumidos": 0, "justificativa": "Decisor deterministico"}},
     {{"fase": "Phase 5", "tokens_consumidos": 0, "justificativa": "Criador de arquivos Python"}},
-    {{"fase": "Phase 6", "tokens_consumidos": 0, "justificativa": "Documentador determinístico"}}
+    {{"fase": "Phase 6", "tokens_consumidos": 0, "justificativa": "Documentador deterministico"}}
   ],
   "total_tokens": 9500,
   "percentual_determinismo": 67
 }}
 """,
 
-    'arquiteto_ferramentas': """Você é um Arquiteto de Ferramentas AIDD.
+    'arquiteto_ferramentas': """# ENTRADA: AIDD Tools Architect — recommend Skills, MCPs, and Hooks for this project.
 
-Recomende as **Skills, MCPs e Hooks** necessários para este projeto:
+For each tool:
+- Name
+- Type (Skill / MCP / Hook / Script)
+- Purpose
+- GLOBAL or LOCAL? (can be both)
+- Justification
 
-Para cada ferramenta:
-- Nome
-- Tipo (Skill / MCP / Hook / Script)
-- Propósito
-- GLOBAL ou LOCAL? (pode ser ambos)
-- Justificativa
+# COT: think in English Caveman (3-5 dense lines, no articles):
+# "scan project needs → map to tool types → check scope (global vs local) → justify each → output JSON"
 
-SAÍDA (JSON):
+# SAIDA: Return JSON only. RESPOND IN BRAZILIAN PORTUGUESE (PT-BR).
 {{
   "ferramentas": [
     {{
       "nome": "save-plan-tripartite",
       "tipo": "Skill",
-      "proposito": "Gerar documentação em 3 formatos",
+      "proposito": "Gerar documentacao em 3 formatos",
       "escopo": "GLOBAL",
-      "justificativa": "Reutilizável em múltiplos projetos"
+      "justificativa": "Reutilizavel em multiplos projetos"
     }}
   ]
 }}
 """,
 
-    'especialista_gates': """Você é um Especialista em Validação AIDD.
+    'especialista_gates': """# ENTRADA: AIDD Validation Specialist — design mechanical gates for this project.
 
-Projete os **Gates (validações mecânicas)** necessários:
-- Gate G0: Validação de entrada
-- Gate G1: Verificação de dependências
-- Gate G2: Validação de integridade
-- Outros gates específicos do projeto
+Design the required **Gates (mechanical validations)**:
+- Gate G0: Input validation
+- Gate G1: Dependency verification
+- Gate G2: Integrity validation
+- Other project-specific gates
 
-Para cada gate:
-- ID do gate
-- Descrição
-- Checklist (o que validar)
-- Critério de sucesso
-- Retorna: exit 0 ou exit 1
+For each gate:
+- Gate ID
+- Description
+- Checklist (what to validate)
+- Success criterion
+- Returns: exit 0 or exit 1
 
-SAÍDA (JSON):
+# COT: think in English Caveman (3-5 dense lines, no articles):
+# "identify validation points → design gate per point → define checklist → set success criteria → output JSON"
+
+# SAIDA: Return JSON only. RESPOND IN BRAZILIAN PORTUGUESE (PT-BR).
 {{
   "gates": [
     {{
       "gate_id": "G0",
-      "descricao": "Validar entrada do usuário",
-      "checklist": ["Campo não vazio", "Formato válido"],
+      "descricao": "Validar entrada do usuario",
+      "checklist": ["Campo nao vazio", "Formato valido"],
       "criterio_sucesso": "Todos os checks passaram",
       "retorno": "exit 0 ou exit 1"
     }}

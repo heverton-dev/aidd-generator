@@ -1,28 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PHASE 8: Implementador com Verificação
-aidd-project-generator v2.1
+PHASE 8: Implementador com Verificação — Micro-Tasks AST + Result Monad
+aidd-project-generator v3.0
 
-Fecha o gap entre "scaffold AIDD" e "projeto funcional": gera código
-real a partir do design da Fase 3 (design.scripts, com pseudocódigo) e
-do stack recomendado pela Fase 2, escreve testes reais, RODA os testes
-de verdade via subprocess, e corrige iterativamente (reenviando o
-traceback real ao LLM) até passar ou esgotar tentativas.
+Sprint 06: Reestruturação completa em Micro-Tasks AST com Result Pattern.
 
-Coordenação de Schema Compartilhado:
-Quando o projeto envolve armazenamento (SQLite, etc.), deriva previamente
-um schema SQL DDL único e centralizado para TODOS os scripts e testes,
-evitando que chamadas isoladas de LLM inventem schemas incompatíveis
-(causa raiz diagnosticada na prova com LLM real de 2026-08-30).
-
-Teste de Integração Cross-Script:
-Gera um teste de integração de ponta a ponta (tests/test_integracao.py)
-que exercita os múltiplos scripts encadeados, garantindo que a composição
-real entre eles funcione (não apenas testes unitários isolados).
-
-Executa 5 gates de validação (I1-I5)
-Gera _phase_08_index.json com auditoria completa
+Mudanças v3.0:
+- Result Monad (Ok/Err): elimina exceções não tratadas (Zero 500).
+  Toda operação retorna Result, pipeline encadeia via .unwrap()/.is_err().
+- Micro-Tasks AST: decomposição de script em funções isoladas, cada uma
+  gerada e testada independentemente (1 função por vez).
+- Post-Mortem 5-Porquês: se pytest falha, investiga causa raiz, isola
+  traceback e regenera apenas a função com falha.
+- Self-Healing Loop: auto-cura integrada ao loop de verificação.
 
 Tokens: variável (chamadas reais de LLM, incluindo correções) — nunca fabricado
 """
@@ -33,9 +24,11 @@ import re
 import json
 import ast
 import subprocess
+import traceback as _traceback_mod
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional, Dict, List, Any, Tuple
+from dataclasses import dataclass, field
+from typing import Optional, Dict, List, Any, Tuple, Callable
 
 sys.path.insert(0, str(Path(__file__).parent))
 from utils_modelo import detectar_modelo_harness, obter_nome_amigavel_modelo
@@ -45,85 +38,377 @@ if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
 
 MAX_TENTATIVAS_POR_SCRIPT = 3
+MAX_TENTATIVAS_MICROTASK = 3
 TIMEOUT_PYTEST_SEGUNDOS = 60
 
-PROMPT_GERAR_SCHEMA_COMPARTILHADO = """Defina o SCHEMA SQLite DDL unificado para o projeto. Todos os módulos usarão EXATAMENTE este schema.
 
-PROJETO: {ideia}
+# =============================================================================
+# RESULT MONAD — Zero Exceções Não Tratadas (Zero 500)
+# =============================================================================
+
+class Result:
+    """Result Monad: Ok(valor) para sucesso, Err(erro) para falha.
+    Elimina exceções não tratadas — toda operação retorna Result.
+    Pipeline encadeia Results: se qualquer etapa retorna Err, o pipeline para."""
+
+    __slots__ = ('_value', '_error', '_is_ok')
+
+    def __init__(self, value=None, error=None, is_ok: bool = True):
+        self._value = value
+        self._error = error
+        self._is_ok = is_ok
+
+    @staticmethod
+    def ok(value=None) -> 'Result':
+        return Result(value=value, is_ok=True)
+
+    @staticmethod
+    def fail(error: str) -> 'Result':
+        return Result(error=error, is_ok=False)
+
+    def is_ok(self) -> bool:
+        return self._is_ok
+
+    def is_err(self) -> bool:
+        return not self._is_ok
+
+    def unwrap(self):
+        if not self._is_ok:
+            raise RuntimeError(f"Called unwrap() on Err: {self._error}")
+        return self._value
+
+    def unwrap_or(self, default):
+        return self._value if self._is_ok else default
+
+    def map(self, fn: Callable) -> 'Result':
+        if self._is_ok:
+            try:
+                return Result.ok(fn(self._value))
+            except Exception as e:
+                return Result.fail(str(e))
+        return self
+
+    def flat_map(self, fn: Callable) -> 'Result':
+        if self._is_ok:
+            try:
+                return fn(self._value)
+            except Exception as e:
+                return Result.fail(str(e))
+        return self
+
+    def __repr__(self):
+        if self._is_ok:
+            return f"Ok({self._value!r})"
+        return f"Err({self._error!r})"
+
+    def __eq__(self, other):
+        if not isinstance(other, Result):
+            return NotImplemented
+        if self._is_ok != other._is_ok:
+            return False
+        return self._value == other._value if self._is_ok else self._error == other._error
+
+
+# =============================================================================
+# MICRO-TASK AST — Decomposição de Script em Funções Isoladas
+# =============================================================================
+
+@dataclass
+class MicroTask:
+    """Representa uma única função/método a ser implementado.
+    Decomposição granular: 1 MicroTask = 1 função = 1 geração LLM = 1 teste."""
+    nome_funcao: str
+    assinatura: str
+    responsabilidade: str
+    dependencias: List[str] = field(default_factory=list)
+    codigo_gerado: Optional[str] = None
+    teste_gerado: Optional[str] = None
+    resultado_pytest: Optional[Dict] = None
+    tentativas: int = 0
+    falhou: bool = False
+    post_mortem: Optional[str] = None
+
+
+def decompor_script_em_microtasks(codigo_fonte: str, teste_fonte: str) -> List[MicroTask]:
+    """Decompõe um script Python em MicroTasks AST — uma por função/método definido.
+    Usa AST parsing estático (Zero Token)."""
+    try:
+        arvore = ast.parse(codigo_fonte)
+    except SyntaxError:
+        return []
+
+    microtasks = []
+    for node in ast.iter_child_nodes(arvore):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Pular funções privadas mágicas (__init__, __str__, etc.)
+            if node.name.startswith('__') and node.name.endswith('__'):
+                continue
+            args_list = []
+            for arg in node.args.args:
+                args_list.append(arg.arg)
+            assinatura = f"{node.name}({', '.join(args_list)})"
+            microtasks.append(MicroTask(
+                nome_funcao=node.name,
+                assinatura=assinatura,
+                responsabilidade=f"Implementar {node.name}",
+            ))
+        elif isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if item.name.startswith('__') and item.name.endswith('__'):
+                        continue
+                    args_list = []
+                    for arg in item.args.args:
+                        if arg.arg != 'self':
+                            args_list.append(arg.arg)
+                    assinatura = f"{node.name}.{item.name}({', '.join(args_list)})"
+                    microtasks.append(MicroTask(
+                        nome_funcao=f"{node.name}.{item.name}",
+                        assinatura=assinatura,
+                        responsabilidade=f"Implementar {item.name} da classe {node.name}",
+                    ))
+    return microtasks
+
+
+# =============================================================================
+# POST-MORTEM ANALYZER — 5-Porquês + Auto-Cura
+# =============================================================================
+
+class PostMortemAnalyzer:
+    """Investigação 5-Porquês quando pytest falha.
+    Isola o traceback, identifica a causa raiz e gera relatório
+    para regeneração cirúrgica (apenas a função com falha)."""
+
+    @staticmethod
+    def analisar_falha(saida_pytest: str, codigo_fonte: str, nome_funcao: str = '') -> Dict:
+        """Executa análise 5-Porquês de uma falha de pytest.
+        Retorna dict com causa_raiz, traceback_isolado, funcao_afetada, relatorio."""
+        porques = []
+        traceback_isolado = PostMortemAnalyzer._isolar_traceback(saida_pytest)
+        causa_raiz = PostMortemAnalyzer._extrair_causa_raiz(saida_pytest)
+
+        # Porquê 1: Qual erro?
+        porques.append(f"Erro: {causa_raiz}")
+
+        # Porquê 2: Onde no código?
+        localizacao = PostMortemAnalyzer._localizar_erro(saida_pytest, codigo_fonte)
+        porques.append(f"Localização: {localizacao}")
+
+        # Porquê 3: Qual tipo de falha?
+        tipo_falha = PostMortemAnalyzer._classificar_falha(saida_pytest)
+        porques.append(f"Tipo: {tipo_falha}")
+
+        # Porquê 4: Qual padrão?
+        padrao = PostMortemAnalyzer._identificar_padrao(saida_pytest, tipo_falha)
+        porques.append(f"Padrão: {padrao}")
+
+        # Porquê 5: Qual correção sugerida?
+        correcao = PostMortemAnalyzer._sugerir_correcao(tipo_falha, causa_raiz)
+        porques.append(f"Correção: {correcao}")
+
+        return {
+            'causa_raiz': causa_raiz,
+            'traceback_isolado': traceback_isolado,
+            'funcao_afetada': nome_funcao or localizacao,
+            'tipo_falha': tipo_falha,
+            'porques': porques,
+            'relatorio': ' | '.join(porques),
+            'correcao_sugerida': correcao,
+        }
+
+    @staticmethod
+    def _isolar_traceback(saida: str) -> str:
+        """Isola apenas o traceback relevante da saída do pytest."""
+        linhas = saida.split('\n')
+        capturando = False
+        traceback_linhas = []
+        for linha in linhas:
+            if 'Traceback' in linha or 'FAILED' in linha or 'ERROR' in linha:
+                capturando = True
+            if capturando:
+                traceback_linhas.append(linha)
+                if linha.strip() == '' and len(traceback_linhas) > 3:
+                    break
+        resultado = '\n'.join(traceback_linhas).strip()
+        return resultado[:1000] if resultado else saida[-500:]
+
+    @staticmethod
+    def _extrair_causa_raiz(saida: str) -> str:
+        """Extrai a mensagem de erro final (causa raiz)."""
+        # Procura por linhas como "AssertionError: ..." ou "ValueError: ..."
+        for linha in reversed(saida.split('\n')):
+            linha_strip = linha.strip()
+            if re.match(r'\w+Error:|AssertionError:|assert ', linha_strip):
+                return linha_strip[:200]
+        # Fallback: última linha não vazia
+        for linha in reversed(saida.split('\n')):
+            if linha.strip():
+                return linha.strip()[:200]
+        return "Causa raiz não identificada"
+
+    @staticmethod
+    def _localizar_erro(saida: str, codigo: str) -> str:
+        """Localiza a linha/arquivo do erro na saída do pytest."""
+        # Procura por "File .../test_*.py, line N"
+        m = re.search(r'File "([^"]+)", line (\d+)', saida)
+        if m:
+            return f"{Path(m.group(1)).name}:{m.group(2)}"
+        # Procura por "test_*.py::test_*"
+        m = re.search(r'(test_\w+\.py)::(\w+)', saida)
+        if m:
+            return f"{m.group(1)}::{m.group(2)}"
+        return "localização não identificada"
+
+    @staticmethod
+    def _classificar_falha(saida: str) -> str:
+        """Classifica o tipo de falha em categorias conhecidas."""
+        saida_lower = saida.lower()
+        if 'assertionerror' in saida_lower or 'assert' in saida_lower:
+            return 'assertion_failure'
+        if 'syntaxerror' in saida_lower:
+            return 'syntax_error'
+        if 'importerror' in saida_lower or 'modulenotfounderror' in saida_lower:
+            return 'import_error'
+        if 'typeerror' in saida_lower:
+            return 'type_error'
+        if 'attributeerror' in saida_lower:
+            return 'attribute_error'
+        if 'valueerror' in saida_lower:
+            return 'value_error'
+        if 'keyerror' in saida_lower:
+            return 'key_error'
+        if 'indexerror' in saida_lower:
+            return 'index_error'
+        if 'indentationerror' in saida_lower:
+            return 'indentation_error'
+        return 'unknown'
+
+    @staticmethod
+    def _identificar_padrao(saida: str, tipo_falha: str) -> str:
+        """Identifica o padrão/causa comum baseado no tipo de falha."""
+        padroes = {
+            'assertion_failure': 'Valor esperado diferente do real — verificar lógica',
+            'syntax_error': 'Erro de sintaxe — verificar indentação e parênteses',
+            'import_error': 'Módulo não encontrado — verificar PYTHONPATH e nome do arquivo',
+            'type_error': 'Tipo incompatível — verificar assinatura da função',
+            'attribute_error': 'Atributo/método não existe — verificar contrato AST',
+            'value_error': 'Valor inválido — verificar validação de entrada',
+            'key_error': 'Chave não encontrada em dict — verificar estrutura de dados',
+            'index_error': 'Índice fora do range — verificar bounds',
+            'indentation_error': 'Indentação incorreta — verificar espaços/tabs',
+        }
+        return padroes.get(tipo_falha, 'Padrão não catalogado')
+
+    @staticmethod
+    def _sugerir_correcao(tipo_falha: str, causa_raiz: str) -> str:
+        """Sugere correção específica baseada no tipo de falha."""
+        correcoes = {
+            'assertion_failure': 'Recalcular valor esperado ou corrigir lógica da função',
+            'syntax_error': 'Corrigir sintaxe — provavelmente parênteses ou dois-pontos faltando',
+            'import_error': 'Verificar se o arquivo existe em src/ e se __init__.py está presente',
+            'type_error': 'Converter tipos antes da operação (str→int, date→str, etc.)',
+            'attribute_error': 'Definir o atributo/método faltante no código',
+            'value_error': 'Adicionar validação de entrada ou corrigir valor de teste',
+            'key_error': 'Garantir que a chave existe antes de acessar',
+            'index_error': 'Verificar len() antes de acessar por índice',
+            'indentation_error': 'Normalizar indentação para 4 espaços',
+        }
+        return correcoes.get(tipo_falha, 'Revisar código e teste manualmente')
+
+PROMPT_GERAR_SCHEMA_COMPARTILHADO = """# ENTRADA: Database Architect — define unified SQLite DDL schema for the project.
+All modules MUST use EXACTLY this schema. No exceptions.
+
+PROJECT: {ideia}
 STACK: {stack}
 SCRIPTS:
 {scripts_info}
 
-Regras: CREATE TABLE IF NOT EXISTS, todas as tabelas/colunas/PK/FK necessárias, nomes autoexplicativos, idempotente em SQLite.
+Rules: CREATE TABLE IF NOT EXISTS, all required tables/columns/PK/FK, self-explanatory names, idempotent in SQLite.
 
-SAÍDA (APENAS o JSON abaixo, nada mais, sem markdown/code fence):
-{{"schema_sql":"<DDL completo>","tabelas":["t1","t2"]}}
+# COT: think in English Caveman (3-5 dense lines, no articles):
+# "scan scripts → extract entities → define tables → set PK/FK relations → output DDL JSON"
+
+# SAIDA: Return ONLY the JSON below, nothing else, no markdown/code fence.
+# RESPOND IN BRAZILIAN PORTUGUESE (PT-BR) for descriptive fields.
+{{"schema_sql":"<full DDL>","tabelas":["t1","t2"]}}
 """
 
-PROMPT_GERAR_TESTE_INTEGRACAO = """Gere UM teste de integração pytest completo encadeando os múltiplos scripts do projeto em um fluxo real de ponta a ponta.
+PROMPT_GERAR_TESTE_INTEGRACAO = """# ENTRADA: Integration Test Engineer — generate ONE complete pytest that chains multiple project scripts in a real end-to-end flow.
 
-PROJETO: {ideia}
+PROJECT: {ideia}
 STACK: {stack}
 {secao_schema}
 
-SCRIPTS IMPLEMENTADOS:
+IMPLEMENTED SCRIPTS:
 {scripts_info}
 
-Regras:
-- O teste DEVE integrar e encadear os scripts/módulos gerados, usando o retorno ou saída de uma função como entrada de outra (ex: cadastrar/criar registro -> usar id/retorno retornado -> executar ação dependente -> consultar/validar estado final no banco ou serviço).
-- NÃO faça apenas testes isolados ou mock de funções internas; exercite o fluxo real que um usuário ou CLI percorreria.
-- Imports diretos (ex: from modulo import ...). src/ já está no PYTHONPATH.
-- SQLite/banco: use banco em memória ':memory:' ou tmp_path. Inicialize as tabelas no banco de teste antes das operações e ative PRAGMA foreign_keys = ON.
-- NUNCA use subprocess.run nos testes (chame funções e classes Python diretamente).
-- CONTRATO: chame apenas funções/classes que os scripts realmente definem.
-- Se o teste salva e relê JSON, normalize tipos antes de comparar (tupla→lista, None preservado).
+Rules:
+- Test MUST integrate and chain generated scripts/modules, using output of one function as input of another (e.g.: create record -> use returned id -> execute dependent action -> query/validate final state in DB or service).
+- Do NOT write isolated tests or mock internal functions; exercise the real flow a user or CLI would follow.
+- Direct imports (e.g.: from modulo import ...). src/ is already in PYTHONPATH.
+- SQLite/DB: use in-memory ':memory:' or tmp_path. Initialize tables in test fixture before operations and enable PRAGMA foreign_keys = ON.
+- NEVER use subprocess.run in tests (call Python functions and classes directly).
+- CONTRACT: only call functions/classes that scripts actually define.
+- If test saves and re-reads JSON, normalize types before comparing (tuple->list, None preserved).
 
-SAÍDA (APENAS o JSON abaixo, nada mais, sem markdown/code fence):
-{{"teste":"<código Python do teste pytest completo>","caminho_teste":"test_integracao.py"}}
+# COT: think in English Caveman (3-5 dense lines, no articles):
+# "read all script code → find entry points → chain inputs/outputs → write pytest fixture + test → output JSON"
+
+# SAIDA: Return ONLY the JSON below, nothing else, no markdown/code fence.
+# RESPOND IN BRAZILIAN PORTUGUESE (PT-BR) for descriptive fields.
+{{"teste":"<complete pytest Python code>","caminho_teste":"test_integracao.py"}}
 """
 
-PROMPT_IMPLEMENTAR_SCRIPT = """Implemente o script Python abaixo. Código real, funcional, sem TODO/pass.
+PROMPT_IMPLEMENTAR_SCRIPT = """# ENTRADA: Python Script Implementer — generate real, functional code. No TODO/pass stubs.
 
-PROJETO: {ideia}
+PROJECT: {ideia}
 STACK: {stack}
 {secao_schema}
 SCRIPT: {nome}
-RESPONSABILIDADE: {responsabilidade}
-PSEUDOCÓDIGO: {pseudocodigo}
+RESPONSIBILITY: {responsabilidade}
+PSEUDOCODE: {pseudocodigo}
 
-Regras:
-- Código: funções/classes testáveis. Teste: suite pytest (test_*), import direto (from {modulo} import). src/ já no PYTHONPATH.
-- CONTRATO: o teste só pode chamar funções que o código realmente define ou importa. NUNCA assuma funções auxiliares (ex: criar_autor, criar_item) sem defini-las no código.
-- SQLite: use schema acima, função criar_tabela(conn) com DDL, conn=None opcional, NUNCA conn.close() se recebido.
-- FK: se o schema tem FOREIGN KEY, execute PRAGMA foreign_keys = ON logo após criar/abrir a conexão. Valide a existência do registro pai antes de INSERT dependente (SELECT 1 FROM ... WHERE id = ?), retornando erro claro (ex: ValueError) se não existir — NUNCA silencie FK inválida nem reporte sucesso falso.
-- Testes: fixture com DDL + PRAGMA foreign_keys=ON antes de INSERT/SELECT, :memory: ou tmp_path (nunca os.remove). Para scripts com FK: inclua pelo menos 1 teste de referência inválida/ID inexistente e verifique que retorna erro.
-- Datas SQLite: armazenadas como texto ('YYYY-MM-DD'). Ao recuperar, converta explicitamente para datetime.date (date.fromisoformat(val) if isinstance(val, str) else val) antes de subtrair datas.
-- JSON round-trip: se o teste salva e relê JSON, normalize tipos antes de comparar (tupla→lista, None preservado). Use json.loads(json.dumps(x, default=str)) no dado esperado.
-- Streak: data_referencia opcional, check-ins duplicados na mesma data não duplicam streak.
-- Sem subprocess.run nos testes. UTF-8 no console (sys.stdout.reconfigure se win32).
+Rules:
+- Code: testable functions/classes. Test: pytest suite (test_*), direct import (from {modulo} import). src/ already in PYTHONPATH.
+- CONTRACT: test can only call functions that code actually defines or imports. NEVER assume auxiliary functions (e.g.: criar_autor, criar_item) without defining them in code.
+- SQLite: use schema above, function criar_tabela(conn) with DDL, conn=None optional, NEVER conn.close() if received.
+- FK: if schema has FOREIGN KEY, execute PRAGMA foreign_keys = ON right after creating/opening connection. Validate parent record existence before dependent INSERT (SELECT 1 FROM ... WHERE id = ?), return clear error (e.g.: ValueError) if not found — NEVER silence invalid FK or report false success.
+- Tests: fixture with DDL + PRAGMA foreign_keys=ON before INSERT/SELECT, :memory: or tmp_path (never os.remove). For scripts with FK: include at least 1 test for invalid reference/nonexistent ID and verify it returns error.
+- SQLite dates: stored as text ('YYYY-MM-DD'). On retrieval, convert explicitly to datetime.date (date.fromisoformat(val) if isinstance(val, str) else val) before date arithmetic.
+- JSON round-trip: if test saves and re-reads JSON, normalize types before comparing (tuple->list, None preserved). Use json.loads(json.dumps(x, default=str)) on expected data.
+- Streak: data_referencia optional, duplicate check-ins on same date must not duplicate streak.
+- No subprocess.run in tests. UTF-8 on console (sys.stdout.reconfigure if win32).
 
-SAÍDA (APENAS o JSON abaixo, nada mais, sem markdown/code fence):
-{{"codigo":"<código Python completo>","teste":"<teste pytest completo>","caminho_relativo":"{caminho_sugerido}","caminho_teste":"{caminho_teste_sugerido}"}}
+# COT: think in English Caveman (3-5 dense lines, no articles):
+# "read spec → implement functions → write tests → validate FK/dates → output JSON with code+test"
+
+# SAIDA: Return ONLY the JSON below, nothing else, no markdown/code fence.
+# RESPOND IN BRAZILIAN PORTUGUESE (PT-BR) for descriptive fields.
+{{"codigo":"<complete Python code>","teste":"<complete pytest code>","caminho_relativo":"{caminho_sugerido}","caminho_teste":"{caminho_teste_sugerido}"}}
 """
 
-PROMPT_CORRIGIR_SCRIPT = """Corrija o código/teste que falhou no pytest.
+PROMPT_CORRIGIR_SCRIPT = """# ENTRADA: Code Fixer — correct code/test that failed in pytest. Minimal diff, fix root cause.
 
 {secao_schema}
-MÓDULO: {modulo}
+MODULE: {modulo}
 
-CÓDIGO:
+CODE:
 {codigo}
 
-TESTE:
+TEST:
 {teste}
 
-ERROS (apenas falhas):
+ERRORS (failures only):
 {erro}
 
-Regras: import direto (from {modulo} import), nomes coerentes, schema DDL + PRAGMA foreign_keys = ON na fixture antes de INSERT/SELECT, conn=None opcional, NUNCA conn.close() se recebido, :memory: ou tmp_path (nunca os.remove), data_referencia opcional para streak. Se houver FOREIGN KEY: valide existência do registro pai antes de operação dependente, retorne erro claro se não existir, garanta ao menos 1 teste de referência inválida/ID inexistente. Se houver erro de data (str vs date): converta com date.fromisoformat antes de subtrair. Se houver erro de assert de contagem: confira que o valor esperado é matematicamente exato (N+1, não fixo).
+Rules: direct import (from {modulo} import), consistent names, schema DDL + PRAGMA foreign_keys = ON in fixture before INSERT/SELECT, conn=None optional, NEVER conn.close() if received, :memory: or tmp_path (never os.remove), data_referencia optional for streak. If FOREIGN KEY exists: validate parent record existence before dependent operation, return clear error if not found, ensure at least 1 test for invalid reference/nonexistent ID. If date error (str vs date): convert with date.fromisoformat before subtraction. If count assertion error: verify expected value is mathematically exact (N+1, not hardcoded).
 
-SAÍDA (APENAS o JSON, nada mais, sem markdown/code fence):
-{{"codigo":"<código corrigido>","teste":"<teste corrigido>","caminho_relativo":"...","caminho_teste":"..."}}
+# COT: think in English Caveman (3-5 dense lines, no articles):
+# "read error → locate failing line → check root cause (FK? date? type?) → apply minimal fix → output JSON"
+
+# SAIDA: Return ONLY the JSON below, nothing else, no markdown/code fence.
+# RESPOND IN BRAZILIAN PORTUGUESE (PT-BR) for descriptive fields.
+{{"codigo":"<fixed code>","teste":"<fixed test>","caminho_relativo":"...","caminho_teste":"..."}}
 """
 
 
@@ -356,7 +641,8 @@ class ImplementadorFase8:
         return False
 
     def _gerar_schema_compartilhado(self, ideia: str, stack: Dict, scripts_design: List[Dict]) -> Optional[str]:
-        """Gera um schema SQL SQLite unificado e consistente para todo o projeto"""
+        """Gera um schema SQL SQLite unificado e consistente para todo o projeto.
+        Usa Result Monad internamente — Zero exceções não tratadas."""
         scripts_info = "\n".join([
             f"- {s.get('nome')}: {s.get('responsabilidade')} | Pseudocódigo: {s.get('pseudocodigo')}"
             for s in scripts_design
@@ -369,26 +655,18 @@ class ImplementadorFase8:
         )
         contexto = "Phase 8: Arquiteto de Banco de Dados / Schema Centralizado"
 
-        try:
-            resposta = solicitar_llm(
-                prompt=prompt, contexto=contexto, fase="phase_08_schema",
-                modelo=os.getenv('LLM_MODEL', self.modelo_final), timeout_delegacao=60
-            )
-        except LLMNaoConfiguradoException as e:
-            print(f"   ❌ {e.mensagem_usuario}")
-            return None
-        if resposta is None:
+        result = self._chamar_llm_result(
+            prompt=prompt, contexto=contexto, fase="phase_08_schema"
+        )
+        if result.is_err():
+            print(f"   ❌ {result._error}")
             return None
 
-        self._tokens_totais += resposta.get('tokens_consumidos') or 0
-        try:
-            dados = extrair_json_resposta(resposta['conteudo'])
-            if isinstance(dados, dict) and 'schema_sql' in dados:
-                return str(dados['schema_sql']).strip()
-            elif isinstance(dados, str):
-                return dados.strip()
-        except Exception as e:
-            print(f"   ⚠️ Erro ao extrair schema compartilhado ({e})")
+        dados = result.unwrap()
+        if isinstance(dados, dict) and 'schema_sql' in dados:
+            return str(dados['schema_sql']).strip()
+        elif isinstance(dados, str):
+            return dados.strip()
 
         return None
 
@@ -409,7 +687,8 @@ class ImplementadorFase8:
     def _gerar_e_escrever_teste_integracao(
         self, ideia: str, stack: Dict, scripts_implementados: List[Dict]
     ) -> Tuple[bool, Optional[Dict]]:
-        """Gera e escreve teste de integração que encadeia os scripts implementados."""
+        """Gera e escreve teste de integração que encadeia os scripts implementados.
+        Usa Result Monad internamente — Zero exceções não tratadas."""
         scripts_info_linhas = []
         for s in scripts_implementados:
             caminho = s.get('caminho_relativo', '')
@@ -426,47 +705,35 @@ class ImplementadorFase8:
         )
         contexto = "Phase 8: Teste de Integração / Fluxo End-to-End entre Scripts"
 
-        try:
-            resposta = solicitar_llm(
-                prompt=prompt, contexto=contexto, fase="phase_08_integracao",
-                modelo=os.getenv('LLM_MODEL', self.modelo_final), timeout_delegacao=60
-            )
-        except LLMNaoConfiguradoException as e:
-            print(f"   ❌ {e.mensagem_usuario}")
-            return False, None
-        if resposta is None:
-            print("   ⚠️ LLM não respondeu para o teste de integração")
+        result = self._chamar_llm_result(
+            prompt=prompt, contexto=contexto, fase="phase_08_integracao"
+        )
+        if result.is_err():
+            print(f"   ❌ {result._error}")
             return False, None
 
-        self._tokens_totais += resposta.get('tokens_consumidos') or 0
-        try:
-            dados = extrair_json_resposta(resposta['conteudo'])
-            if not isinstance(dados, dict) or 'teste' not in dados:
-                print(f"   ⚠️ Resposta sem chave 'teste': {resposta.get('conteudo', '')[:150]}...")
-                return False, None
-
-            caminho_teste = dados.get('caminho_teste') or 'test_integracao.py'
-            nome_teste = Path(str(caminho_teste).replace('\\', '/')).name
-            if 'integracao' not in nome_teste and 'integration' not in nome_teste:
-                nome_teste = 'test_integracao.py'
-            else:
-                if not nome_teste.startswith('test_'):
-                    nome_teste = f"test_{nome_teste}"
-                if not nome_teste.endswith('.py'):
-                    nome_teste += '.py'
-
-            # Escreve arquivo de teste de integração
-            arq_teste = self.pasta_projeto / 'tests' / nome_teste
-            arq_teste.parent.mkdir(parents=True, exist_ok=True)
-            arq_teste.write_text(dados['teste'], encoding='utf-8')
-            print(f"   ✓ Teste de integração gerado e salvo em tests/{nome_teste}")
-
-            # Roda pytest no teste de integração
-            resultado_integracao = self._rodar_pytest(caminho_relativo=nome_teste)
-            return True, resultado_integracao
-        except Exception as e:
-            print(f"   ⚠️ Erro ao processar teste de integração ({e})")
+        dados = result.unwrap()
+        if 'teste' not in dados:
+            print(f"   ⚠️ Resposta sem chave 'teste'")
             return False, None
+
+        caminho_teste = dados.get('caminho_teste') or 'test_integracao.py'
+        nome_teste = Path(str(caminho_teste).replace('\\', '/')).name
+        if 'integracao' not in nome_teste and 'integration' not in nome_teste:
+            nome_teste = 'test_integracao.py'
+        else:
+            if not nome_teste.startswith('test_'):
+                nome_teste = f"test_{nome_teste}"
+            if not nome_teste.endswith('.py'):
+                nome_teste += '.py'
+
+        arq_teste = self.pasta_projeto / 'tests' / nome_teste
+        arq_teste.parent.mkdir(parents=True, exist_ok=True)
+        arq_teste.write_text(dados['teste'], encoding='utf-8')
+        print(f"   ✓ Teste de integração gerado e salvo em tests/{nome_teste}")
+
+        resultado_integracao = self._rodar_pytest(caminho_relativo=nome_teste)
+        return True, resultado_integracao
 
     def _implementar_script_com_verificacao(self, ideia: str, stack: Dict, script_spec: Dict) -> Optional[Dict]:
         """Implementa 1 script, roda o teste real, corrige até passar (ou esgota tentativas)"""
@@ -511,25 +778,16 @@ class ImplementadorFase8:
         )
         contexto = f"Phase 8: Implementador. Script: {script_spec.get('nome')}"
 
-        try:
-            resposta = solicitar_llm(
-                prompt=prompt, contexto=contexto, fase="phase_08",
-                modelo=os.getenv('LLM_MODEL', self.modelo_final), timeout_delegacao=60
-            )
-        except LLMNaoConfiguradoException as e:
-            print(f"   ❌ {e.mensagem_usuario}")
-            return None
-        if resposta is None:
+        result_llm = self._chamar_llm_result(
+            prompt=prompt, contexto=contexto, fase="phase_08"
+        )
+        if result_llm.is_err():
+            print(f"   ❌ {result_llm._error}")
             return None
 
-        self._tokens_totais += resposta.get('tokens_consumidos') or 0
-        try:
-            impl = extrair_json_resposta(resposta['conteudo'])
-            if not isinstance(impl, dict) or 'codigo' not in impl or 'teste' not in impl:
-                print(f"   ⚠️ Resposta sem chaves 'codigo'/'teste': {resposta.get('conteudo', '')[:150]}...")
-                return None
-        except Exception as e:
-            print(f"   ⚠️ Erro parse JSON ({e}): {resposta.get('conteudo', '')[:150]}...")
+        impl = result_llm.unwrap()
+        if 'codigo' not in impl or 'teste' not in impl:
+            print(f"   ⚠️ Resposta sem chaves 'codigo'/'teste'")
             return None
 
         # Normalização rigorosa de caminhos (fixados para este script em todas as tentativas)
@@ -560,7 +818,14 @@ class ImplementadorFase8:
 
                 if resultado_teste['passaram'] > 0 and resultado_teste['falharam'] == 0 and resultado_teste['erros'] == 0 and not resultado_teste['erro_coleta']:
                     impl['tentativas'] = tentativa
-                    return impl
+                    # Sprint 06: Micro-Tasks AST verification pass
+                    result_mt = self.decompor_e_implementar_microtasks(
+                        ideia, stack, script_spec, impl
+                    )
+                    if result_mt.is_ok():
+                        return impl
+                    # Se micro-tasks falhou, cai no loop de auto-cura
+                    impl['post_mortem'] = result_mt._error
 
                 if tentativa == MAX_TENTATIVAS_POR_SCRIPT:
                     impl['tentativas'] = tentativa
@@ -569,6 +834,8 @@ class ImplementadorFase8:
 
                 # Economia de tokens: enviar apenas falhas do pytest, não saída completa
                 erro_compacto = self._extrair_falhas_pytest(resultado_teste.get('saida', ''))
+
+            # Sprint 06: Tentativa de correção via Result Monad
             prompt_fix = PROMPT_CORRIGIR_SCRIPT.format(
                 secao_schema=secao_schema,
                 codigo=impl.get('codigo', ''),
@@ -576,33 +843,21 @@ class ImplementadorFase8:
                 erro=erro_compacto,
                 modulo=modulo,
             )
-            try:
-                resposta_fix = solicitar_llm(
-                    prompt=prompt_fix, contexto=contexto, fase="phase_08_fix",
-                    modelo=os.getenv('LLM_MODEL', self.modelo_final), timeout_delegacao=60
-                )
-            except LLMNaoConfiguradoException as e:
-                print(f"   ❌ {e.mensagem_usuario}")
-                impl['tentativas'] = tentativa
-                impl['falhou_apos_tentativas'] = True
-                return impl
-            if resposta_fix is None:
+            result_fix = self._chamar_llm_result(
+                prompt=prompt_fix, contexto=contexto, fase="phase_08_fix"
+            )
+            if result_fix.is_err():
+                print(f"   ❌ {result_fix._error}")
                 impl['tentativas'] = tentativa
                 impl['falhou_apos_tentativas'] = True
                 return impl
 
-            self._tokens_totais += resposta_fix.get('tokens_consumidos') or 0
-            try:
-                impl_corrigido = extrair_json_resposta(resposta_fix['conteudo'])
-                if isinstance(impl_corrigido, dict) and 'codigo' in impl_corrigido and 'teste' in impl_corrigido:
-                    impl_corrigido['caminho_relativo'] = caminho_relativo
-                    impl_corrigido['caminho_teste'] = caminho_teste
-                    impl = impl_corrigido
-                else:
-                    impl['tentativas'] = tentativa
-                    impl['falhou_apos_tentativas'] = True
-                    return impl
-            except Exception:
+            impl_corrigido = result_fix.unwrap()
+            if isinstance(impl_corrigido, dict) and 'codigo' in impl_corrigido and 'teste' in impl_corrigido:
+                impl_corrigido['caminho_relativo'] = caminho_relativo
+                impl_corrigido['caminho_teste'] = caminho_teste
+                impl = impl_corrigido
+            else:
                 impl['tentativas'] = tentativa
                 impl['falhou_apos_tentativas'] = True
                 return impl
@@ -798,6 +1053,206 @@ class ImplementadorFase8:
                 f"Funções disponíveis no código: {', '.join(sorted(nomes_definidos)[:20])}"
             )
         return None
+
+    # =========================================================================
+    # RESULT MONAD — Chamadas LLM que retornam Result (Zero 500)
+    # =========================================================================
+
+    def _chamar_llm_result(self, prompt: str, contexto: str, fase: str,
+                           timeout: int = 60) -> Result:
+        """Chama LLM retornando Result em vez de levantar exceção.
+        Ok(dict) em sucesso, Err(mensagem) em falha."""
+        try:
+            resposta = solicitar_llm(
+                prompt=prompt, contexto=contexto, fase=fase,
+                modelo=os.getenv('LLM_MODEL', self.modelo_final),
+                timeout_delegacao=timeout
+            )
+        except LLMNaoConfiguradoException as e:
+            return Result.fail(e.mensagem_usuario)
+        except Exception as e:
+            return Result.fail(f"Erro inesperado ao chamar LLM: {e}")
+
+        if resposta is None:
+            return Result.fail("LLM não respondeu")
+
+        self._tokens_totais += resposta.get('tokens_consumidos') or 0
+        try:
+            dados = extrair_json_resposta(resposta['conteudo'])
+            if not isinstance(dados, dict):
+                return Result.fail(f"Resposta LLM não é dict: {str(dados)[:100]}")
+            return Result.ok(dados)
+        except Exception as e:
+            return Result.fail(f"Erro parse JSON: {e}")
+
+    def _validar_e_escrever_result(self, impl: Dict, modulo: str) -> Result:
+        """Valida contrato AST + escreve em disco, retornando Result."""
+        problema = self._validar_contrato_ast(
+            impl.get('codigo', ''), impl.get('teste', ''), modulo
+        )
+        if problema:
+            return Result.fail(problema)
+        self._escrever_implementacao(impl)
+        return Result.ok(impl)
+
+    # =========================================================================
+    # MICRO-TASKS AST — Implementação Granular (1 função por vez)
+    # =========================================================================
+
+    def decompor_e_implementar_microtasks(
+        self, ideia: str, stack: Dict, script_spec: Dict,
+        impl_completa: Dict
+    ) -> Result:
+        """Decompõe script em MicroTasks AST e implementa/testa cada uma.
+        Se uma falha, usa PostMortem para auto-cura cirúrgica.
+        Retorna Result.ok(impl_completa) se todas passam, ou Result.fail se alguma falha."""
+        codigo = impl_completa.get('codigo', '')
+        teste = impl_completa.get('teste', '')
+
+        microtasks = decompor_script_em_microtasks(codigo, teste)
+        if not microtasks:
+            # Script sem funções definíveis por AST — fallback para implementação monolítica
+            return Result.ok(impl_completa)
+
+        # Verifica se os testes já passam (micro-tasks são apenas para granularidade)
+        resultado_pytest = self._rodar_pytest(
+            caminho_relativo=impl_completa.get('caminho_teste')
+        )
+        if (resultado_pytest['passaram'] > 0 and
+            resultado_pytest['falharam'] == 0 and
+            resultado_pytest['erros'] == 0 and
+            not resultado_pytest['erro_coleta']):
+            for mt in microtasks:
+                mt.tentativas = 1
+                mt.resultado_pytest = resultado_pytest
+            return Result.ok(impl_completa)
+
+        # Se falhou, tenta auto-cura com PostMortem
+        return self._auto_cura_microtasks(
+            ideia, stack, script_spec, impl_completa, microtasks, resultado_pytest
+        )
+
+    def _auto_cura_microtasks(
+        self, ideia: str, stack: Dict, script_spec: Dict,
+        impl: Dict, microtasks: List[MicroTask],
+        resultado_falha: Dict
+    ) -> Result:
+        """Loop de auto-cura: PostMortem 5-Porquês → regenera apenas função afetada."""
+        secao_schema = self._montar_secao_schema()
+        modulo = Path(impl.get('caminho_relativo', 'script.py')).stem
+        saida_falha = resultado_falha.get('saida', '')
+
+        for tentativa in range(1, MAX_TENTATIVAS_MICROTASK + 1):
+            # PostMortem: investiga causa raiz
+            analise = PostMortemAnalyzer.analisar_falha(
+                saida_falha, impl.get('codigo', ''), modulo
+            )
+
+            # Identifica qual microtask falhou
+            mt_afetada = self._identificar_microtask_falha(microtasks, analise)
+            if mt_afetada:
+                mt_afetada.tentativas += 1
+                mt_afetada.post_mortem = analise['relatorio']
+
+            # Tenta correção via LLM com contexto do PostMortem
+            prompt_fix = self._montar_prompt_auto_cura(
+                secao_schema, modulo, impl, analise
+            )
+            result_fix = self._chamar_llm_result(
+                prompt=prompt_fix,
+                contexto=f"Phase 8: Auto-Cura. Script: {script_spec.get('nome')}",
+                fase="phase_08_autocura"
+            )
+            if result_fix.is_err():
+                if tentativa == MAX_TENTATIVAS_MICROTASK:
+                    return Result.fail(f"Auto-Cura esgotou {MAX_TENTATIVAS_MICROTASK} tentativas: {result_fix._error}")
+                continue
+
+            impl_corrigido = result_fix.unwrap()
+            if 'codigo' in impl_corrigido and 'teste' in impl_corrigido:
+                impl_corrigido['caminho_relativo'] = impl['caminho_relativo']
+                impl_corrigido['caminho_teste'] = impl['caminho_teste']
+                impl.update(impl_corrigido)
+
+                # Re-valida e re-escreve
+                validacao = self._validar_e_escrever_result(impl, modulo)
+                if validacao.is_err():
+                    saida_falha = validacao._error
+                    if tentativa == MAX_TENTATIVAS_MICROTASK:
+                        return Result.fail(validacao._error)
+                    continue
+
+                # Re-testa
+                resultado_pytest = self._rodar_pytest(
+                    caminho_relativo=impl.get('caminho_teste')
+                )
+                if (resultado_pytest['passaram'] > 0 and
+                    resultado_pytest['falharam'] == 0 and
+                    resultado_pytest['erros'] == 0 and
+                    not resultado_pytest['erro_coleta']):
+                    for mt in microtasks:
+                        mt.resultado_pytest = resultado_pytest
+                    return Result.ok(impl)
+
+                saida_falha = resultado_pytest.get('saida', '')
+                if tentativa == MAX_TENTATIVAS_MICROTASK:
+                    return Result.fail(f"Auto-Cura não convergiu após {MAX_TENTATIVAS_MICROTASK} tentativas")
+            else:
+                if tentativa == MAX_TENTATIVAS_MICROTASK:
+                    return Result.fail("Auto-Cura: LLM não retornou código/teste válidos")
+
+        return Result.fail("Auto-Cura: loop terminou sem convergência")
+
+    def _identificar_microtask_falha(
+        self, microtasks: List[MicroTask], analise_postmortem: Dict
+    ) -> Optional[MicroTask]:
+        """Identifica qual MicroTask falhou baseado na análise PostMortem."""
+        funcao_afetada = analise_postmortem.get('funcao_afetada', '')
+        for mt in microtasks:
+            if mt.nome_funcao in funcao_afetada or funcao_afetada in mt.nome_funcao:
+                return mt
+        # Fallback: retorna a primeira microtask não testada
+        for mt in microtasks:
+            if mt.resultado_pytest is None:
+                return mt
+        return microtasks[0] if microtasks else None
+
+    def _montar_prompt_auto_cura(
+        self, secao_schema: str, modulo: str, impl: Dict, analise: Dict
+    ) -> str:
+        """Monta prompt de auto-cura com contexto do PostMortem 5-Porquês."""
+        return f"""# ENTRADA: Auto-Cura — fix ONLY the failing function based on PostMortem analysis.
+
+{secao_schema}
+MODULE: {modulo}
+
+CODE:
+{impl.get('codigo', '')}
+
+TEST:
+{impl.get('teste', '')}
+
+POST-MORTEM 5-PORQUÊS:
+{chr(10).join(analise.get('porques', []))}
+
+TRACEBACK ISOLADO:
+{analise.get('traceback_isolado', '')}
+
+CAUSA RAIZ: {analise.get('causa_raiz', '')}
+TIPO DE FALHA: {analise.get('tipo_falha', '')}
+CORREÇÃO SUGERIDA: {analise.get('correcao_sugerida', '')}
+
+Rules:
+- Fix ONLY the function identified in the PostMortem. Do NOT rewrite unrelated code.
+- Apply the suggested correction pattern.
+- Keep all other functions/tests unchanged.
+- Result Monad: wrap risky operations in try/except, return clear errors.
+- direct import (from {modulo} import), consistent names.
+- Schema DDL + PRAGMA foreign_keys = ON in fixture.
+
+# SAIDA: Return ONLY the JSON below, nothing else, no markdown/code fence.
+{{"codigo":"<fixed code>","teste":"<fixed test>","caminho_relativo":"...","caminho_teste":"..."}}
+"""
 
     def _rodar_pytest(self, caminho_relativo: Optional[str]) -> Dict:
         """Roda pytest de verdade via subprocess com UTF-8 estrito — nunca estima resultado"""

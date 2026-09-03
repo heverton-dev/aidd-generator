@@ -275,7 +275,8 @@ def test_implementar_script_corrige_na_segunda_tentativa(implementador_08, tmp_p
             return resposta_llm(dict(IMPL_VALIDA, codigo='def somar(a, b):\n    return a - b\n'))  # bug proposital
         return resposta_llm(IMPL_VALIDA)  # correção
 
-    resultados_pytest = iter([PytestFake(passaram=0, falharam=1), PytestFake(passaram=1, falharam=0)])
+    # Sprint 06: 3 resultados — falha, sucesso (fix), sucesso (micro-task verification)
+    resultados_pytest = iter([PytestFake(passaram=0, falharam=1), PytestFake(passaram=1, falharam=0), PytestFake(passaram=1, falharam=0)])
     monkeypatch.setattr(implementador_08, 'solicitar_llm', fake_solicitar_llm)
     monkeypatch.setattr(implementador_08.subprocess, 'run', lambda *a, **kw: next(resultados_pytest))
 
@@ -582,15 +583,15 @@ def test_prompts_contem_regras_foreign_key_e_integridade_referencial(implementad
     prompt_impl = implementador_08.PROMPT_IMPLEMENTAR_SCRIPT
     prompt_corr = implementador_08.PROMPT_CORRIGIR_SCRIPT
 
-    # Verifica regras no prompt de implementação
+    # Verifica regras no prompt de implementação (prompts agora em EN — Caveman Ultra)
     assert "PRAGMA foreign_keys = ON" in prompt_impl
     assert "FOREIGN KEY" in prompt_impl
-    assert "registro pai" in prompt_impl.lower()
-    assert "referência inválida" in prompt_impl.lower() or "referencia invalida" in prompt_impl.lower()
+    assert "parent record" in prompt_impl.lower()
+    assert "invalid reference" in prompt_impl.lower() or "nonexistent id" in prompt_impl.lower()
 
     # Verifica regras no prompt de correção
     assert "PRAGMA foreign_keys = ON" in prompt_corr
-    assert "registro pai" in prompt_corr.lower()
+    assert "parent record" in prompt_corr.lower()
 
 
 def test_validar_contrato_ast_detecta_autoimportacao_invalida(implementador_08):
