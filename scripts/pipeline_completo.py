@@ -23,6 +23,12 @@ auto-crítica (Fase 7) audita o projeto funcional completo.
 Sem fallback silencioso: se qualquer fase falhar (retornar None), o
 pipeline para imediatamente e reporta exatamente qual fase e por quê —
 nunca segue adiante com dado fabricado ou fase pulada.
+
+Inovações v2.1:
+- Fleet Discovery: auto-descoberta de agentes instalados no host
+- Context-Purge Engine: subagentes efêmeros com descarte imediato de contexto
+- Intent Router: detecção de intenção para /generate e linguagem natural
+- Micro-ambientes: cada fase tem AGENTS.md com regras isoladas
 """
 
 import sys
@@ -42,6 +48,8 @@ sys.path.insert(0, str(PHASES_DIR))
 # Pré-voo LLM (verifica LLM_MODEL + credencial antes de rodar o pipeline)
 from preflight_llm import verificar_llm_pronto  # noqa: E402
 from utils_delegacao import LLMNaoConfiguradoException
+from utils_fleet_discovery import resolver_fleet, fleet_status_para_log, persistir_fleet_status
+from utils_subagente_ephemero import ContextPurgeEngine
 
 
 def _carregar_fase(alias: str, filename: str):
@@ -87,6 +95,16 @@ def executar_pipeline(ideia: str, pasta_projeto: Path, nao_interativo: bool = Tr
 
     resultado = {'ideia': ideia, 'pasta': str(pasta_projeto), 'fases_completas': {}}
     t0 = time.time()
+
+    # Fleet Discovery: auto-detectar agentes instalados no host
+    fleet = resolver_fleet()
+    resultado['fleet'] = fleet.to_dict()
+    print(f"\n🔍 Fleet Discovery:")
+    print(fleet_status_para_log(fleet))
+    persistir_fleet_status(fleet, pasta_cache=cache_dir)
+
+    # Context-Purge Engine: inicializar para métricas de subagentes efêmeros
+    purge_engine = ContextPurgeEngine(pasta_cache=cache_dir)
 
     print("\n" + "=" * 70)
     print(f"PIPELINE COMPLETO: FASE 1/{total_fases} — Pesquisador")
@@ -168,6 +186,11 @@ def executar_pipeline(ideia: str, pasta_projeto: Path, nao_interativo: bool = Tr
 
     resultado['status'] = 'COMPLETO'
     resultado['duracao_segundos'] = time.time() - t0
+
+    # Persistir métricas do Context-Purge Engine
+    resultado['context_purge'] = purge_engine.metricas.to_dict()
+    purge_engine.persistir_metricas()
+
     return resultado
 
 
@@ -209,6 +232,15 @@ def main():
     print("\n" + "=" * 70)
     if resultado['status'] == 'COMPLETO':
         print(f"✅ PIPELINE COMPLETO — score final: {resultado.get('score_final')}/100")
+        # Fleet info
+        fleet_info = resultado.get('fleet', {})
+        print(f"   Fleet: {fleet_info.get('modo', '?')} ({fleet_info.get('total_detectados', 0)} agente(s))")
+        # Context-Purge metrics
+        purge_info = resultado.get('context_purge', {})
+        if purge_info:
+            print(f"   Context-Purge: {purge_info.get('total_subagentes_criados', 0)} subagentes, "
+                  f"{purge_info.get('total_tokens_consumidos', 0)} tokens, "
+                  f"{purge_info.get('taxa_sucesso', 0)}% sucesso")
     else:
         print(f"❌ PIPELINE FALHOU na {resultado['fase_que_falhou']}")
     print(f"   Duração: {resultado['duracao_segundos']:.1f}s")
